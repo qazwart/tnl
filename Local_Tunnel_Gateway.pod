@@ -1,0 +1,29 @@
+=head1 NAME
+
+Local::Tunnel::Gateway
+
+=head1 Synopsis
+
+    my $gateway = Local::Tunnel::Gateway->new( $tnlrc_line );
+
+=head1 DESCRIPTION
+
+Creates a Gateway object used in C<tnl>.
+
+This class is a sub-class of C<Local::Tunnel::Common>. The
+C<Local::Tunnel::Common> class contains other methods that are shared
+between C<Local::Tunnel::Gateway> and C<Local::Tunnel::System>.
+
+=head1 Methods
+
+=over 4
+
+=item * StartPort
+
+Sets or gets a starting port that the gateway will use for systems
+logging through to the requested system.
+
+=back
+
+=cut
+

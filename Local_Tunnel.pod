@@ -1,0 +1,42 @@
+=pod
+
+=head1 NAME
+
+Local::Tunnel
+
+=head1 SYSNOPSIS
+
+     my $tunnel = Local::Tunnel->new( $tnlrc_file );
+
+=head1 DESCRIPTION
+
+Creates a Tunnel Object for the Tunnel Resource File. Makes it easy
+to parse the file for information.
+
+=head1 METHODS
+
+=over 4
+
+=item * Gateway
+
+A hash of L<Local::Tunnel::Gateway> objects. If passed a valid System or
+IP address, returns the Gateway alias name.
+
+=item * System
+
+A hash of L<Local::Tunnel::System> objects. If passes a valid System or
+IP address returns a System alias name.
+
+=item * Sys2name
+
+A hash lookup table for System or IP addresses to the names you give
+in the Tunnel Resource file.
+
+=item * Gwy2name
+
+A hash lookup table for Gateway or IP addresses to the names you give
+in the Tunnel Resource file.
+
+=back
+
+=cut

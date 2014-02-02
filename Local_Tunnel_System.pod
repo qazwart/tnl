@@ -1,0 +1,38 @@
+=head1 NAME
+
+Local::Tunnel::System
+
+=head1 Synopsis
+
+    my $system = Local::Tunnel::System->new( $tnlrc_line );
+
+=head1 DESCRIPTION
+
+Creates a System object used in C<tnl>.
+
+This class is a sub-class of C<Local::Tunnel::Common>. The
+C<Local::Tunnel::Common> class contains other methods that are shared
+between C<Local::Tunnel::Gateway> and C<Local::Tunnel::System>.
+
+=head1 Methods
+
+=over 4
+
+=item * X11
+
+Does this system allow X11 protocol tunneling?
+
+=item * Gateway
+
+Setter/Getter for the name of the gateway this system will be limited
+to using.
+
+=item * Tunnel_port
+
+Setter/Getter for the tunnel port. This is usually automatically set
+by the tunnel. However, you may specify a particular port if so desired.
+
+=back
+
+=cut
+

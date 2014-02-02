@@ -1,0 +1,1058 @@
+#! /usr/bin/env perl
+# tnl
+########################################################################
+
+use strict;
+use warnings;
+use autodie;
+use feature qw(say);
+use Pod::Usage;
+use Data::Dumper;
+use IO::File;
+
+use constant {
+    TNLRC	=> "$ENV{HOME}/.tnlrc",
+    NOHUP	=> "nohup",
+    SSH		=> '/usr/bin/ssh',
+    TNL_RE	=> qr(
+	^\s*			# Line might start with whitespace
+	(?:\S+/)?ssh\s+		# But should have "ssh" as a command
+	.*?			# There will be a bunch of stuff
+	(?:\w+@)?(\S+)\s+	# User at host should be next
+	-L			# This is the first tunnel
+	#)x,
+
+};
+#
+########################################################################
+
+my $command 	= shift;
+my $system 	= shift; 
+
+# my $tnl = Local::Tunnel->new( TNLRC );
+
+if ( not defined $command ) {
+    die qq(No subcommand given. Type "tnl help" for help\n);
+}
+
+if    ( $command eq "start" )	{ start_gateway( $system );  }
+elsif ( $command eq "stop"  )	{ stop_gateway( $system );   }
+elsif ( $command eq "ssh"   )	{ connect_system( $system ); }
+#elsif ( $command eq "on"    )	{ connect_gateway(); }
+elsif ( $command eq "ls"    )	{ list_systems();   }
+elsif ( $command eq "lsgwy" ) 	{ list_gateways();  }
+#
+# Help!
+#
+elsif ( $command eq "man"   )	{ pod2usage ( -verbose => 2 ); }
+elsif ( $command eq "help"  )	{ pod2usage () }
+elsif ( $command eq "tnlrc" )	{ pod2usage ( -verbose => 99, -sections => "TUNNEL RESOURCE FILE" ); }
+else  {
+    say qq(Invalid comamnd. type "tnl help" for help);
+}
+
+#
+# Start a Gateway system
+#
+sub start_gateway {
+    my $gateway_name =	shift;
+
+    my $tnl = Local::Tunnel->new( TNLRC );
+    my %gateways = $tnl->Gateway;
+    if ( not exists $gateways{ $gateway_name } ) {
+	die qq(No such Gateway "$gateway_name".)
+	    . qq( Use "tnl lsgwy" to see defined gateways\n);
+    }
+    my $gateway_obj = $gateways{ $gateway_name };
+    if ( $gateway_obj->Pid ) {
+	die qq(Gateway "$gateway_name" is already running.\n) 
+	    . qq(Use "tnl stop $gateway_name" to stop gateway first.);
+    }
+    #
+    # Now Build the Gateway Command: First find all systems that aren't active
+    #
+    my $tnl_command;
+    my %systems = $tnl->System;
+    my $next_port = $gateway_obj->Start_port;
+    #
+    # Find Ports Already in use
+    #
+    my %ports_in_use;
+    for my $system_name ( keys %systems ) {
+	my $system_obj = $systems{ $system_name };
+	next unless $system_obj->Active;
+	$ports_in_use{ $system_obj->Tunnel } = 1;
+    }
+    #
+    # Find systems to Activates
+    #
+    my %systems_to_activate;
+    my %systems_ports; # These are the ports you have to use
+    for my $system_name ( keys %systems ) {
+	my $system_obj = $systems{ $system_name };
+	next if $system_obj->Active;
+	next if defined $system_obj->Gateway
+	    and $system_obj->Gateway ne "$gateway_name";
+	my $tunnel_port = $system_obj->Tunnel_port;
+	my $system = $system_obj->System;
+	if ( defined $tunnel_port and not $ports_in_use{ $tunnel_port } ) {
+	    $systems_to_activate{ $system } = $tunnel_port;
+	    my $system_port;
+	    if ( defined $system_obj->Port ) {
+		$system_port = $system_obj->Port ;
+	    }
+	    else { # Default Port
+		$system_port = 22;
+	    }
+	    $systems_ports{ $system } = $system_port;
+	    $ports_in_use{ $tunnel_port } = 1;
+	}
+	else { # Activate System on next available port
+	    PORT:
+	    for (;;) {
+		last PORT unless defined $ports_in_use{ $next_port };
+		$next_port++;
+	    }
+	    $systems_to_activate{ $system } = $next_port;
+	    my $system_port;
+	    if ( defined $system_obj->Port ) {
+		$system_port = $system_obj->Port ;
+	    }
+	    else { # Default Port
+		$system_port = 22;
+	    }
+	    $systems_ports{ $system } = $system_port;
+	    $ports_in_use{ $next_port } = 1;
+	} # if ( defined $tunnel_port and not $ports_in_use{ $tunnel_port } )
+    } # for my $system_obj ( keys %systems )
+    if ( not %systems_to_activate ) {
+	die qq(There are no systems to activate with tunnel "$gateway_name".\n);
+    }
+    #
+    # Now you have a list of the ports, let's build our little command
+    #
+    my $port = $gateway_obj->Port;
+    if ( $port ) {
+	$port = "-p $port";
+    }
+    my $crypt = $gateway_obj->Crypt;
+    if ( $crypt ) {
+	$crypt = "-c $crypt"
+    }
+    my $debug = $gateway_obj->Debug;
+    if ( $debug ) {
+	$debug = "-v " x $debug;
+    }
+    else {
+	$debug = "";
+    }
+    my $gateway_system = $gateway_obj->System;
+    my $user = $gateway_obj->User;
+    if ( defined $user ) {
+	$gateway_system = "$user\@$gateway_system";
+    }
+    #
+    # First half of the command
+    #
+    my $command = "ssh -N $debug $crypt $gateway_system";
+    #
+    # Now the second half of the command
+    #
+    for my $system ( keys %systems_to_activate ) {
+	my $port = $systems_to_activate{ $system };
+	my $system_port = $systems_ports{$system};
+	$command .= " -L $port/$system/$system_port";
+    }
+    say "Starting gateway $gateway_name";
+    system qq(nohup $command &);
+    list_systems();
+}
+
+#
+# Stop a Gateway system
+#
+sub stop_gateway {
+    my $gateway_name = shift;
+
+    my $tnl = Local::Tunnel->new( TNLRC );
+    my %gateways = $tnl->Gateway;	#Need to look up gateway
+    if ( not exists $gateways{ $gateway_name } ) {
+	die qq(Gateway $gateway_name is not defined.\n);
+    }
+    my $gateway_obj = $gateways{ $gateway_name };
+    my $pid = $gateway_obj->Pid;
+    if ( not defined $pid ) {
+	die qq(Gateway "$gateway_name is not active.) 
+	    . qq( Run "tnl lsgwy" to see active gateways.);
+    }
+    say qq(Stopping gateway "$gateway_name" on Process ID $pid.);
+    my $error = system qq( kill $pid );
+    if ( $error ) {
+	die qq(Error in stopping Gateway $gateway_name on Process ID $pid.);
+    }
+    sleep 2;
+
+    #
+    # Check if Tunnel has been killed
+    #
+    $tnl = Local::Tunnel->new( TNLRC );
+    %gateways = $tnl->Gateway;
+    $gateway_obj = $gateways{ $gateway_name };
+    exit unless $gateway_obj->Active;
+    if ( $pid ) {
+	say qq(Gateway is still up. Trying sure kill on Process ID $pid.);
+	$error = system qq(kill -9 $pid);
+	if ( $error ) {
+	    die qq(Error in stopping Gateway $gateway_name on Process ID $pid.);
+	}
+    }
+    say qq(Gateway "$gateway_name" has been stopped.);
+}
+
+#
+# SSH to a system
+#
+sub connect_system {
+    my $system_name	= shift;
+
+    my $user;
+    if ( $system_name =~ /(.+)\@(.+)/ ) { # User given in command
+	$user = $1;
+	$system_name = $2;
+    }
+
+    my $tnl = Local::Tunnel->new( TNLRC );
+    my $system = $tnl->System( $system_name );
+    if ( not $system ) {
+	die qq(System "$system_name" is not defined in "@{[TNLRC]}" file\n);
+    }
+    if ( not $system->Active ) {
+	die qq(Cannot log into $system_name. Gateway is not active.\n);
+    }
+    if ( not defined $user ) {
+	$user = $system->User;
+    }
+    my $crypt = $system->Crypt;
+    my $debug = $system->Debug;
+    my $tunnel_port = $system->Tunnel_port;
+    my $system_system = $system->System;
+    if ( defined $debug ) {
+	$debug = "-v " x $debug;
+    }
+    else {
+	$debug = "";
+    }
+    if ( defined $crypt ) {
+	$crypt = "-c $crypt";
+    }
+    else {
+	$crypt = "";
+    }
+    if ( defined $user ) {
+	$system = "$user\@localhost";
+    }
+    else {
+	$system = "localhost";
+    }
+    system qq(ssh -p $tunnel_port $crypt $debug $system);
+}
+
+sub connect_gateway {
+}
+
+#
+# List active systems for a particular gateway
+#
+sub list_systems {
+    my $gateway = shift;
+
+    my $tnl = Local::Tunnel->new( TNLRC );
+
+    #
+    # Work out a system to name table. REMEMBER: You can have multiple
+    # names to a single system!
+    #
+
+    my %systems = $tnl->System;
+    my %systems_to_names;
+    for my $name ( sort keys %systems ) {
+	my $system = $systems{$name}->System;
+	if ( not exists $systems_to_names{$system} ) {
+	    $systems_to_names{$system} = [];
+	}
+	push @{ $systems_to_names{$system} }, $name;
+    }
+
+    my $format = "%-1.1s %-10.10s %-15.15s %-5.5s %-10.10s %-15.15s %-5.5s %-5.5s %s\n";
+    printf "$format","*",  "Name", "System", "Port", "User", "Gateway", "X11?", "Debug", "Crypt";
+    for my $system ( sort keys %systems ) {
+	my $entry = $systems{ $system };
+	my $x11 = $entry->X11 ? "Yes" : "No";
+	my $port;
+	my $active = "";
+	my $gateway = $entry->Gateway ? $entry->Gateway : "";
+	if ( defined $entry->Tunnel_port ) {
+	    $port = $entry->Tunnel_port;
+	    $active = "*";
+	}
+	    
+	no warnings qw(uninitialized);
+	printf "$format", $active, $entry->Name, $entry->System, $port, $entry->User,
+	    $gateway, $x11, $entry->Debug, $entry->Crypt;
+	use warnings qw(uninitialized);
+    }
+}
+
+#
+# List Gateways
+#
+sub list_gateways {
+    my $tnl = Local::Tunnel->new( TNLRC );
+
+    my $format = "%-6.6s  %-15.15s  %-15.15s  %-5.5s  %-5.5s  %-15.15s %s\n";
+
+    my %gateways = $tnl->Gateway;
+    printf "$format", "PID", "Name", "System", "Start", "Port", "Crypt", "Debug";
+    for my $gateway ( sort keys %gateways ) {
+	my $entry = $gateways{ $gateway };
+	my $pid = "";
+	if ( $entry->Pid ) {
+	    $pid = sprintf "%6d", $entry->Pid;
+	}
+	no warnings qw(uninitialized);
+	printf "$format", $pid, $entry->Name, $entry->System, $entry->Start_port,
+	    $entry->Port, $entry->Crypt, $entry->Debug;
+    }
+}
+
+########################################################################
+# PACKAGE Local::Tunnel
+#
+# Read in the Tunnel Resource as an object you can parse
+#
+package Local::Tunnel;
+
+use Data::Dumper;
+use Carp;
+use constant {
+    GATEWAY_LINE	=> qr/^gateway:\s*/,
+    SYSTEM_LINE		=> qr/^system:\s*/,
+    PGREP_RE 		=> 'ssh.*-L',
+    PS_COMMAND		=> 'ps -o command=""',
+};
+
+use IO::File;
+
+sub new {
+    my $class		= shift;
+    my $file		= shift;
+
+    my $self = {};
+    bless $self, $class;
+
+    my $tnlrc_fh;
+    if ( not $tnlrc_fh = IO::File->new("$file", "r") ) {
+	croak qq(Cannot open .tnlrc file "$file");
+    }
+
+    #
+    # Read through File and create the gateways and systems
+    #
+    my %gateways;
+    my %systems;
+    my %sys2name;
+    my %gwy2name;
+
+    while ( my $line = $tnlrc_fh->getline ) {
+	chomp $line;
+	if ( $line =~ s/@{[GATEWAY_LINE]}// ) {
+	    my $gateway;
+	    if ( not $gateway = Local::Tunnel::Gateway->new($line) ) {
+		croak( qq(Error in tnlrc file "$file" line )
+		    . $tnlrc_fh->input_line_number
+		    . qq(: Invalid gateway line "$line") );
+	    }
+	    my $gateway_name = $gateway->Name;
+	    if ( exists $gateways{$gateway_name} ) {
+		croak( qq(Error in tnlrc file "$file" line )
+		    . $tnlrc_fh->input_line_number
+		    . qq(: Gateway "$gateway_name" already defined.)
+		);
+	    }
+	    $gateways{$gateway_name} = $gateway;
+	    $gwy2name{ $gateway->System } = $gateway_name;
+	}
+	elsif ( $line =~ s/@{[SYSTEM_LINE]}// ) {
+	    my $system;
+	    if ( not $system = Local::Tunnel::System->new($line) ) {
+		croak( qq(Error in tnlrc file "$file" line )
+		    . $tnlrc_fh->input_line_number
+		    . qq(: Invalid system line "$line") );
+	    }
+
+	    my $system_name = $system->Name;
+	    if ( exists $systems{$system_name} ) {
+		croak( qq(Error in tnlrc file "$file" line )
+		    . $tnlrc_fh->input_line_number
+		    . qq(: System name "$system_name" already defined.)
+		);
+	    }
+	    $systems{$system_name} = $system;
+	    push @{ $sys2name{ $system->System } }, $system_name;
+	}
+	else {
+	    croak( qq(Error in tnlrc file "$file" line )
+		. $tnlrc_fh->input_line_number
+		. qq(: Invalid line "$line".)
+	    );
+	}
+    }
+
+    $self->Sys2name( \%sys2name ); # Add System to Name reverse lookup
+    $self->Gwy2name( \%gwy2name ); # Add Gateway to Name reverse lookup
+    $self->Gateway( \%gateways ); # Add gateways to object
+    $self->System( \%systems );   # Add systems to object;
+    $self->Active;
+
+    return $self;
+}
+
+sub Gateway {
+    my $self		= shift;
+    my $gateway		= shift;
+
+    return $self->_Alias( "gateway", $gateway );
+}
+
+sub Sys2name {
+    my $self		= shift;
+    my $sys2name	= shift;
+    return $self->_Alias( "sys2name", $sys2name );
+}
+
+sub Gwy2name {
+    my $self		= shift;
+    my $gwy2name	= shift;
+    return $self->_Alias( "gwy2name", $gwy2name );
+}
+
+sub System {
+    my $self		= shift;
+    my $system		= shift;
+    return $self->_Alias( "system", $system );
+}
+
+sub _Alias {
+    my $self		= shift;
+    my $type		= shift;
+    my $alias		= shift;
+
+    my $valid_alias = qr/^(gateway|system|sys2name|gwy2name)$/;
+
+    if ( not defined $type or $type !~ $valid_alias ) {
+	croak( qq(Invalid method call. Type must be "system", "sys2name", "gwy2name", or "gateway".) );
+    }
+
+    if ( not defined $alias ) {
+	my $hash_key = uc $type . "S";
+	return %{ $self->{ $hash_key } };
+    }
+
+    #
+    # If the parameter is a hash reference: Replace it
+    #
+    my $hash_key = uc $type . "S";
+    if ( ref $alias eq "HASH" ) { # Replacing everything with this hash
+	 $self->{ $hash_key } = $alias;
+	return $self;
+    }
+
+    #
+    # The parameter should now be a string
+    #
+    elsif ( ref \$alias eq "SCALAR" ) {
+	return $self->{ $hash_key }->{$alias};
+    }
+    else {
+	croak( qq(Invalid call to Method:)
+	    . qq( Must pass in $type name or hash ref of ${type}s) );
+    }
+    return $self;
+}
+
+sub Active {
+    my $tnl			= shift;
+
+    my %gateways  = $tnl->Gateway;
+    my %systems   = $tnl->System;
+    my %sys2names = $tnl->Sys2name;
+    my %gwy2names = $tnl->Gwy2name;
+
+    #
+    # Find Active Tunnels
+    #
+
+    PID:
+    for my $pid ( qx( pgrep -f "ssh.*-L" ) ) {
+	chomp $pid;
+	#
+	# Find Command Line for this PID
+	#
+	my $command_line = qx( @{[PS_COMMAND]} $pid );
+	chomp $command_line;
+	#
+	# Command line will be "ssh -sss sss -sss sss user@gateway -L system -L system ....
+	# So, I can use split along the -L and get the systems.
+	# However, the first one will contain the gateway and not the system.
+	#
+	my @active_systems = split /\s*-L\s*/, $command_line;
+	my $gateway = shift @active_systems;
+	$gateway =~ s/^.*\s+//;		# Gateway, but may have user name too.
+	$gateway =~ s/.*\@//;		# Remove the user name if it was there.
+	my $gateway_name = $tnl->Gwy2name( $gateway );
+	next PID unless $gateway_name;
+	my $gateway_obj = $tnl->Gateway( $gateway_name );
+	next PID unless $gateway_obj;
+	$gateway_obj->Pid($pid);
+	#
+	# Now find the systems, mark them as active, and set their port and
+	# gateway
+	#
+	SYSTEM:
+	for my $active_system ( @active_systems ) {
+	    my ( $tunnel_port, $system ) = split /\//, $active_system;
+	    my $names_ref = $tnl->Sys2name( $system );
+	    next SYSTEM unless $names_ref;
+	    my @names = @{ $names_ref };
+	    SYSTEM_NAME:
+	    for my $name ( @names ) {
+		my $system_obj = $tnl->System( $name );
+		next SYSTEM_NAME unless $system_obj;
+		$system_obj->Tunnel_port($tunnel_port);
+		$system_obj->Active(1);
+		$system_obj->Gateway($gateway_obj->Name);
+	    }
+	}
+    }
+    return;
+}
+#
+########################################################################
+
+########################################################################
+#
+package Local::Tunnel::Common;
+
+use Carp;
+
+sub Name {
+    my $self		= shift;
+    my $name		= shift;
+
+    if ( defined $name ) {
+	$self->{NAME} = $name;
+    }
+    return $self->{NAME};
+}
+
+sub System {
+    my $self		= shift;
+    my $system		= shift;
+
+    if ( defined $system ) {
+	$self->{SYSTEM} = $system;
+    }
+    return $self->{SYSTEM};
+}
+
+sub User {
+    my $self		= shift;
+    my $user		= shift;
+
+    if ( defined $user ) {
+	$self->{USER} = $user;
+    }
+    return $self->{USER};
+}
+
+sub Crypt {
+    my $self		= shift;
+    my $crypt		= shift;
+
+    if ( defined $crypt ) {
+	$self->{CRYPT} = $crypt;
+    }
+    return $self->{CRYPT};
+}
+
+sub Port {
+    my $self		= shift;
+    my $port		= shift;
+
+    if ( defined $port ) {
+	$self->{PORT} = $port;
+    }
+    return $self->{PORT}
+}
+
+sub Debug {
+    my $self		= shift;
+    my $debug_level	= shift;
+
+    if ( defined $debug_level ) {
+	if ( $debug_level !~ /^\d+$/ ) {
+	    croak( qq(Debug must be an integer between 0 to 3) );
+	}
+	if ( $debug_level > 3 ) {
+	    $debug_level = 3;
+	}
+	$self->{DEBUG_LEVEL} = $debug_level;
+    }
+    return $self->{DEBUG_LEVEL};
+}
+
+sub Active {
+    my $self		= shift;
+    my $active		= shift;
+
+    if ( defined $active ) {
+	$self->{ACTIVE} = 1;
+    }
+    return $self->{ACTIVE};
+}
+
+package Local::Tunnel::Gateway;
+use base qw(Local::Tunnel::Common);
+
+use Getopt::Long qw(GetOptionsFromString);
+
+use constant {
+    DEFAULT_SSH_CRYPT		=> "3des",
+    DEFAULT_START_PORT		=> 2000,
+    DEFAULT_SSH_PORT		=> 22,
+};
+
+sub new {
+    my $class		= shift;
+    my $line		= shift;
+
+    my ( $name, $system, $user, $debug );
+    my $crypt		= DEFAULT_SSH_CRYPT;
+    my $start_port	= DEFAULT_START_PORT;
+    my $port 		= DEFAULT_SSH_PORT;
+
+    GetOptionsFromString( $line,
+	"name=s"	=> \$name,
+	"system=s"	=> \$system,
+	"user=s"	=> \$user,
+	"start=i"	=> \$start_port,
+	"crypt=s"	=> \$crypt,
+	"port=i"	=> \$port,
+	"debug=i"	=> \$debug,
+    ) or return;
+    return if not defined $name or not defined $system;
+
+    my $self = {};
+    bless $self, $class;
+
+    $self->Name($name);
+    $self->System($system);
+    $self->User($user);
+    $self->Start_port($start_port);
+    $self->Crypt($crypt);
+    $self->Port($port);
+    $self->Debug($debug);
+
+    return $self;
+}
+
+sub Start_port {
+    my $self		= shift;
+    my $start_port	= shift;
+
+    if ( defined $start_port ) {
+	$self->{START_PORT} = $start_port;
+    }
+    return $self->{START_PORT};
+}
+
+sub System2name {
+    my $self		= shift;
+    my $system		= shift;
+    my $name		= shift;
+
+    if ( not defined $system ) {
+	return %{ $self->{SYSTEM} };
+    }
+
+    if ( defined $system and defined $name ) {
+	$self->{SYSTEM}->{$system} = $name;
+	$self->Name2system( $name, $system );
+    }
+    return $self->{SYSTEM}->{$system};
+}
+
+sub Name2system {
+    my $self		= shift;
+    my $name		= shift;
+    my $system		= shift;
+
+    if ( not defined $name ) {
+	return %{ $self->{SYSTEM_NAME} };
+    }
+    if ( defined $name and defined $system ) {
+	$self->{SYSTEM_NAME}->{$name} = $system;
+    }
+    return $self->{SYSTEM_NAME}->{$name};
+}
+
+sub Name2Port {
+    my $self		= shift;
+    my $name		= shift;
+    my $port		= shift;
+
+    if ( not defined $name ) {
+	return %{ $self->{NAME_PORT} };
+    }
+
+    if ( defined $name and defined $port ) {
+	$self->{NAME_PORT}->{$name} = $port;
+    }
+    return $self->{NAME_PORT}->{$name};
+}
+
+sub Pid {
+    my $self		= shift;
+    my $pid		= shift;
+
+    if ( defined $pid ) {
+	$self->{PID} = $pid;
+    }
+    return $self->{PID};
+}
+
+package Local::Tunnel::System;
+use base qw(Local::Tunnel::Common);
+
+use Carp;
+use Getopt::Long qw(GetOptionsFromString);
+
+use constant {
+    DEFAULT_SSH_PORT		=> 22,
+};
+
+sub new {
+    my $class		= shift;
+    my $line		= shift;
+
+    my ( $name, $system, $user, $x11, $port, $tunnel_port, $crypt, $debug, $gateway);
+    GetOptionsFromString( $line,
+	"name=s"	=> \$name,
+	"system=s"	=> \$system,
+	"user=s"	=> \$user,
+	"gateway=s"	=> \$gateway,
+	"x11"		=> \$x11,
+	"port=i"	=> \$port,
+	"tunnel=i"	=> \$tunnel_port,
+	"crypt=s"	=> \$crypt,
+	"debug=i"	=> \$debug,
+    ) or return;
+
+    if ( not defined $name and not defined $system ) {
+	carp( qq(Must define both "-name" and "-system" parameters) );
+	return;
+    }
+
+    my $self = {};
+    bless $self, $class;
+
+    $self->Name( $name );
+    $self->System( $system );
+    $self->User( $user );
+    $self->Gateway( $gateway );
+    $self->X11( $x11 );
+    $self->Port( $port );
+    $self->Tunnel_port( $tunnel_port );
+    $self->Crypt ( $crypt );
+    $self->Debug ( $debug );
+
+    return $self;
+}
+    
+sub X11 {
+    my $self		= shift;
+    my $x11		= shift;
+
+    if ( defined $x11 ) {
+	$self->{X11} = 1;
+    }
+    return $self->{X11};
+}
+
+sub Gateway {
+    my $self		= shift;
+    my $gateway		= shift;
+
+    if ( defined $gateway ) {
+	$self->{GATEWAY} = $gateway;
+    }
+    return $self->{GATEWAY};
+}
+
+sub Tunnel_port {
+    my $self		= shift;
+    my $tunnel_port	= shift;
+
+    if ( defined $tunnel_port ) {
+	$self->{TUNNEL_PORT} = $tunnel_port;
+    }
+    return $self->{TUNNEL_PORT};
+}
+
+__END__
+
+=pod
+
+=head1 NAME
+
+tnl
+
+=head1 SYNOPSIS
+
+    $ tnl help                # Show basic help
+    $ tnl tnlrc               # Show setup of $HOME/.tnlrc file
+    $ tnl man                 # Complete tnl manpage
+    $ tnl start gatwy1        # Starts tunnel
+    $ tnl ssh tomcat@syssrv3  # Logs in as user "tomcat" on system you called "syssrv3"
+    $ tnl ssh jenkins         # Logs into on system you call Jenkins as current user
+    $ tnl lsgwy               # Shows gateways and status
+    $ tnl ls           	      # Shows configured systems as for that gateway
+    $ tnl stop gatwy3         # Stops the tunnel gatwy3
+
+=head1 DESCRIPTION
+
+SSH Tunnel Manager
+
+This program helps you manage your ssh tunnels. Sometimes, in order
+to log into one system, you must first ssh into another system, and 
+then ssh into the system you want. You can simpify this by using ssh
+tunnel manager.
+
+This program allows you to setup a SSH tunnel and systems you want to
+tunnel to using a file called '.tnlrc' in your $HOME directory.
+
+=head1 SUB-COMMANDS
+
+The following commands can be used by C<tnl>:
+
+=over 4
+
+=item * C<tnl ls>
+
+Lists all defined systems. This will list the I<Name> you call the
+system, the actual system name, the user who should log into that system
+if it is not the default user. The tunnel port it is on, the debug
+setting, and the Cypher (Crytography) setting.
+
+An astrisk on the begging of the list means that system's tunnel is
+active.
+
+=item * C<tnl lsgwy>
+
+Lists all defined gateways. This will list the PID of the gateway
+process if it is active, the name you gave the gateway, and the actual
+system name.
+
+=item * C<< tnl start <gateway> >>
+
+This will start the gateway <gateway>, and the tunnels for all systems
+that can use that gateway.
+
+=item * C<< tnl stop <gateway> >>
+
+This will stop the gateway <gateway> and all tunnels running on that
+gateway.
+
+=item * C<< tnl ssh <name> >>
+
+This will start the system <name> where <name> is the name you gave the
+system. If this name has a defined user, this user will be logged in
+rather than the default user. Note that you can have the same system
+defined with multiple I<names>. This allows you to have multiple user
+names for the same system.
+
+=item * C<< tnl ssh <user>@<name> >>
+
+Same as the above, but forces the system to log you in as user <user>
+instead of the user defined for <name>.
+
+=item * C<tnl help>
+
+Shows the synopsis on using the C<tnl> command.
+
+=item * C<tnl tnlrc>
+
+Shows you information on setting up the C<tnlrc> file.
+
+=item * C<tnl man>
+
+Gives you the complete manpage for the C<tnl> command.
+
+=back
+
+=head1 TUNNEL RESOURCE FILE
+
+The Tunnel Reource File is located at "$HOME/.tnlrc" and consists of
+multiple lines. Each line can be either a B<Gateway Description> or a
+B<System Description>.
+
+A B<Gateway Description> line must begin with C<gateway:>) I<< Note the
+colon on the end of the string! >> A B<System Description> line must
+begin with C<system:> I<< Note the colon on the end of the string! >>.
+
+After the C<gateway:> or C<system:> string is a set of parameters that
+configure either the system or the gateway. You need at least one
+B<Gateway> line. (Otherwise, why do you need to manage SSH Tunnels?) and
+at least one B<System> line. (Otherwise, what systems are you tunneling
+to?)
+
+=head2 Gateway Configuration
+
+   gateway: -name gateway -system corgwy1.prod.local -user bsmith -port 2000
+
+A B<Gateway> system has the following parameters:
+
+=over 4
+
+=item * C<-name>
+
+(I<Required>) The name you are giving the gateway system.
+
+=item * C<-system>
+
+(I<Required>) The actual name of the system or its IP address.
+
+=item * C<-start>
+
+(I<Optional>) The starting port number to use for tunnelling. If this is 2000,
+then the first system will tunnel through port 2000, the next defined one will
+tunnel through port 2001, etc. Systems can override these settings by using
+their own port number.
+
+=item * C<-crypt>
+
+(I<Optional>) The cryptography type to use over the tunnel. The default
+is C<3des>>.  This setting depends upon your system C<ssh> command and
+whether you are using Protocol 1 or Protocol 2. In Protocol 1, you can
+only use a single cryptography method. In Protocol 2, you can use
+multiple ones, each separated by a common.
+
+=item * C<-port>
+
+(I<Optional>) The port to use for the connection. Default is the default
+SSH port 22.
+
+=item * C<-debug>
+
+(I<Optional>) The debugging level for this connection. Valid values are
+from 0 (for no debugging) to 3 (for maximum information). Default is 0.
+
+=back
+
+=head2 System Configuration
+
+   system: -name build -system jenkins2.prod.local
+   system: -name depoly -system maven.prod.local -gateway gateway3
+
+=over 4
+
+=item * C<-name>
+
+(I<Required>) The name you are giving the system. This is the system
+alias you need to use. You cannot use the system name.
+
+=item * C<-system>
+
+The actual system name or its IP address.
+
+=item * C<-user>
+
+The user you want to log in as. You may use the syntax C(<user@name>) to
+override this.
+
+=item * C<-gateway>
+
+This system must use this particular gateway. This allows you to have
+multiple gateways installed and specify that a particular client can
+only be on that gateway.
+
+=item * C<-x11>
+
+Whether or not you want to tunnel X11 through this connection. This
+parameter has no value after it.
+
+=item * C<-port>
+
+The port you want to use for tunneling. This overrides the setting used
+in the Gateway's C<-start> parameter.
+
+=item * C<-crypt>
+
+The crytography type you want to use for this connection. See your
+system's I<ssh manpage> for the proper values to use.
+
+=item * C<-debug>
+
+(I<Optional>) The debugging level for this connection. Valid values are
+from 0 (for no debugging) to 3 (for maximum information). Default is 0.
+
+=back
+
+=head1 BUGS
+
+=over 4
+
+=item * This command is heavily dependent upon the system's C<ssh>
+command. A better version may use the Net::SSH::Perl.
+
+=item * This command does not verify the commands before sending them off
+to the system C<ssh> command.
+
+=back
+
+=head1 AUTHOR
+
+David Weintraub <david@weintraub.name>
+
+=head1 COPYRIGHT
+
+Copyright © 2014 by the author, David Weintraub. All rights reserved. This
+program is covered by the open source BMAB license.
+
+The BMAB (Buy me a beer) license allows you to use all code for whatever reason
+you want with these three caveats:
+
+=over 4
+
+=item 1.
+
+If you make any modifications in the code, please consider sending them to me,
+so I can put them into my code.  
+
+=item 2. 
+
+Give me attribution and credit on this
+program. 
+
+=item 3.
+
+If you're in town, buy me a beer. Or, a cup of coffee which is what
+I'd prefer. Or, if you're feeling really spendthrify, you can buy me lunch. I
+promise to eat with my mouth closed and to use a napkin instead of my sleeves.
+
+=back
+
+=cut
+
+#
+########################################################################

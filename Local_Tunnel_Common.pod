@@ -1,0 +1,55 @@
+=head1 NAME
+
+Local::Tunnel::Common
+
+=head1 Synopsis
+
+No constructor. Only methods
+
+=head1 DESCRIPTION
+
+This is the class of common methods used by C<Local::Tunnel::Gateway>
+and C<Local::Tunnel::System>.
+
+
+=head1 Methods
+
+=over 4
+
+=item * Name
+
+Setter/Getter for the name of the Gateway or System. This is I<your>
+alias for the actual IP address or system name. For example, your
+gateway system may be called C<gtwny3.prod.local>, but you just want to
+refer to it as C<Newyork>.
+
+=item * System
+
+Setter/Getter for the actual system name or IP address of the system or
+Gateway.
+
+=item * User
+
+Setter/Getter of the user who logs into this system or gateway. Default
+is current user, or who is defined in the ssh configuration file.
+
+=item * Crypt
+
+Setter/Getter of the cryptography used. Default is C<3des>. This setting
+is passed to the C<ssh>  command, so you need to check the C<ssh>
+manpage for the allowed values.
+
+=item * Port
+
+On Gateways, the Setter/Getter for the port that C<ssh> must use.
+This is Port 22 by default, but could be changed by the network administrators.
+
+=item * Debug
+
+Setter/Getter for the debugging information. This is a value between
+C<0> (no debugging) and C<3>. This is also passed to the C<ssh> command.
+
+=back
+
+=cut
+

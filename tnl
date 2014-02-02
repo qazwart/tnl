@@ -377,6 +377,7 @@ sub new {
 
     while ( my $line = $tnlrc_fh->getline ) {
 	chomp $line;
+	next if $line =~ /^\s*#/;	# Comment Line
 	if ( $line =~ s/@{[GATEWAY_LINE]}// ) {
 	    my $gateway;
 	    if ( not $gateway = Local::Tunnel::Gateway->new($line) ) {

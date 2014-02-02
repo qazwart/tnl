@@ -81,7 +81,7 @@ sub start_gateway {
     for my $system_name ( keys %systems ) {
 	my $system_obj = $systems{ $system_name };
 	next unless $system_obj->Active;
-	$ports_in_use{ $system_obj->Tunnel } = 1;
+	$ports_in_use{ $system_obj->Tunnel_port } = 1;
     }
     #
     # Find systems to Activates
@@ -163,9 +163,21 @@ sub start_gateway {
 	my $system_port = $systems_ports{$system};
 	$command .= " -L $port/$system/$system_port";
     }
-    say "Starting gateway $gateway_name";
-    system qq(nohup $command &);
-    list_systems();
+    if ( $gateway_obj->Background ) {
+	$command .= "&";	# Toss Gateway command into the background
+	say "Starting gateway $gateway_name in background.";
+    }
+    else {
+	say "Starting gateway $gateway_name in forground.";
+	say "Leave terminal alone, or throw process into the background."
+    }
+    my $error = system qq(nohup $command);
+    if ( $error ) {
+	die qq(Could not start gateway: "$command".\n);
+    }
+    if ( $gateway_obj->Background ) {
+	list_systems();
+    }
 }
 
 #
@@ -636,7 +648,7 @@ sub new {
     my $class		= shift;
     my $line		= shift;
 
-    my ( $name, $system, $user, $debug );
+    my ( $name, $system, $user, $debug, $background );
     my $crypt		= DEFAULT_SSH_CRYPT;
     my $start_port	= DEFAULT_START_PORT;
     my $port 		= DEFAULT_SSH_PORT;
@@ -649,6 +661,7 @@ sub new {
 	"crypt=s"	=> \$crypt,
 	"port=i"	=> \$port,
 	"debug=i"	=> \$debug,
+	"background"	=> \$background,
     ) or return;
     return if not defined $name or not defined $system;
 
@@ -662,6 +675,7 @@ sub new {
     $self->Crypt($crypt);
     $self->Port($port);
     $self->Debug($debug);
+    $self->Background($background);
 
     return $self;
 }
@@ -729,6 +743,15 @@ sub Pid {
 	$self->{PID} = $pid;
     }
     return $self->{PID};
+}
+
+sub Background {
+    my $self		= shift;
+    my $background	= shift;
+    if ( defined $background ) {
+	$self->{BACKGROUND} = $background;
+    }
+    return $self->{BACKGROUND};
 }
 
 package Local::Tunnel::System;
@@ -956,6 +979,20 @@ SSH port 22.
 
 (I<Optional>) The debugging level for this connection. Valid values are
 from 0 (for no debugging) to 3 (for maximum information). Default is 0.
+
+=item * C<-background>
+
+(I<Optional) Start the gateway in the background. You can do this if you
+have setup a public/private key for the tunnel. Otherwise, you'll have
+to start the tunnel in the foreground, so you can enter the password.
+
+After you start the gateway, you should either not use that terminal, or
+you can throw the gateway task into the background if your shell
+supports job control. (B<HINT>: If your shell doesn't support Job
+Control, you should be using a different shell.)
+
+B<NOTE>: Even if you throw the gateway task into the background, closing
+the terminal window may still stop your gateway process. 
 
 =back
 

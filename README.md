@@ -1,209 +1,244 @@
-# NAME
+# The Command Line Tunnel Manager
+### Real Programmers Don't Need GUIs!
 
-tnl
+Sometimes, when you use `ssh`, you need to first log into a _gateway_ machine before you can log into the system you want:
 
-# SYNOPSIS
+    me@myhost:~$ ssh destsystem
+    ssh: Could not resolve hostname destsystem: nodename nor servname provided, or not known
+    me@myhost:~$ ssh gateway
+    Last login: Thu Jan 30 15:47:50 2014 from 10.55.5.53
+    me@gateway:~$ ssh destsystem
+    Last login: Thu Jan 03 10:34:12 2014 from gateway.local
+    
+If you use `ssh`, you can do something called _tunneling_ that can allow you to log in directly from one your system directly to your destination system without first logging in each time to the _gateway_.
 
-    $ tnl help                # Show basic help
-    $ tnl tnlrc               # Show setup of $HOME/.tnlrc file
-    $ tnl man                 # Complete tnl manpage
-    $ tnl start gatwy1        # Starts tunnel
-    $ tnl ssh tomcat@syssrv3  # Logs in as user "tomcat" on system you called "syssrv3"
-    $ tnl ssh jenkins         # Logs into on system you call Jenkins as current user
-    $ tnl lsgwy               # Shows gateways and status
-    $ tnl ls           	      # Shows configured systems as for that gateway
-    $ tnl stop gatwy3         # Stops the tunnel gatwy3
+`ssh` does this by allowing you to create a tunnel on an unused port, and using `ssh` to use that port:
 
-# DESCRIPTION
+    $ ssh -N -L gateway -L 2001/destsystem/22
+    
+This creates a tunnel on Port `2001` to the system `destsystem` taking to `destsystem`'s `ssh` daemon which is listening onto Port 22 (the standard `sshd` port).
 
-SSH Tunnel Manager
+Now if I want to log into `destsystem`, I can do so directly from `myhost`:
 
-This program helps you manage your ssh tunnels. Sometimes, in order
-to log into one system, you must first ssh into another system, and 
-then ssh into the system you want. You can simpify this by using ssh
-tunnel manager.
+    me@myhost:~$ ssh -p 2001 localhost
+    me@gateway:~$ ssh destsystem
+    Last login: Thu Jan 03 10:34:12 2014 from gateway.local
+    
+There are several software programs that allow you to manage these tunnels. However, they all seem to share a few issues:
 
-This program allows you to setup a SSH tunnel and systems you want to
-tunnel to using a file called '.tnlrc' in your $HOME directory.
+* They can be a pain to setup. For some reason, I have to know the ports I want to use for tunneling. Why can't they figure that out for me.
+* When I do my tunneling, I have to remember which port tunnels to which remote systems.
+* Sometimes you have multiple gateways which can reach the same system. That way, if one gateway is down, you can use another. However, you don't want the same ports mapped to different gateways.
+* Many don't show you easily how machines are mapped to various ports.
 
-# SUB-COMMANDS
+Thus, I developed this Tunnel Manager.
 
-The following commands can be used by `tnl`:
+## Overview
 
-- `tnl ls`
+To use the Command Line Tunnel Manger, you need to configure the gateways and systems via the `$HOME/.tnlrc` file. Once that is done, you can use `tnl` and it's various sub-commands to start and stop the gateway, log onto remote systems, and to query the status of the gateways and systems.
 
-    Lists all defined systems. This will list the _Name_ you call the
-    system, the actual system name, the user who should log into that system
-    if it is not the default user. The tunnel port it is on, the debug
-    setting, and the Cypher (Crytography) setting.
+Once you have everything configured via the `$HOME/.tnlrc` file, you have to start up the tunnel on your gateway via the `tnl start` command:
 
-    An astrisk on the begging of the list means that system's tunnel is
-    active.
+    me@myhost:~$ tnl start gateway
+    
+As long as your gateway tunnel is up and running, you can use `tnl ssh` to log into your remote hosts:
 
-- `tnl lsgwy`
+    me@myhost:~$ tnl ssh destsystem
+    
+One you've finished, and no longer need the tunnel connection, you can shutdown the tunnel:
 
-    Lists all defined gateways. This will list the PID of the gateway
-    process if it is active, the name you gave the gateway, and the actual
-    system name.
+    me@myhost:~$ tnl stop gateway
 
-- `tnl start <gateway>`
+## Setting Up the Tunnel Resource File
 
-    This will start the gateway <gateway>, and the tunnels for all systems
-    that can use that gateway.
+All configuration is done by the Tunnel Resource File located at `$HOME/.tnlrc`. Both the systems you want to connect to and the gateways you're tunneling through are configured with this file. Being a plain text file means it's easy to copy, paste, and edit lines.
 
-- `tnl stop <gateway>`
+By having a plain text file, it becomes easy to duplcate configurations.
 
-    This will stop the gateway <gateway> and all tunnels running on that
-    gateway.
+### Gateways
 
-- `tnl ssh <name>`
+Gateways are configured with lines that start with the string: `gateway:`. The word `gateway` must be all lowercase and must be followed by a colon.
 
-    This will start the system <name> where <name> is the name you gave the
-    system. If this name has a defined user, this user will be logged in
-    rather than the default user. Note that you can have the same system
-    defined with multiple _names_. This allows you to have multiple user
-    names for the same system.
+After that, you can specify various parameters using the same parameter syntax used on the command line with parameters starting with one or two _dashes_ followed by their value (if they have one). Below are a few examples:
 
-- `tnl ssh <user>@<name>`
+    gateway: -name detroit -system gwydt01 -start_port 2000
+    
+This gateway is called `detroit` which is really system `gwydt01`. To start up this gateway, you would use:
 
-    Same as the above, but forces the system to log you in as user <user>
-    instead of the user defined for <name>.
+    $ tnl start detroit
+    
+#### Gateway Parameters
 
-- `tnl help`
+The following are valid parameters for the gateway configuration:
 
-    Shows the synopsis on using the `tnl` command.
+* `-name <name>`  
+(**Required**) The name you want to give the gateway. This is the way you will refer to the gateway. Think of it as an alias of the actual system name. The `<name>` can be the same as the system name, but it's always required.
 
-- `tnl tnlrc`
+* `-system <system_or_ip_address>`  
+(**Required**) This is the actual system name or its IP address.
 
-    Shows you information on setting up the `tnlrc` file.
+* `-start <port_num>`  
+(**Required**) This is the starting port number. `tnl` normally does not require you to map systems you're tunneling to ports. Instead, `tnl` does this for you. This is the first port to use, and the first system for this gateway tunnel will be assigned this port. The next will be given the next port up, etc. You can force a mapping of systems to ports, but if you don't `tnl` will do it for you. Since you don't need to know the port of the system you're tunneling to, there is no need to map the ports yourself.
 
-- `tnl man`
+* `-background`  
+(**Optional**) Put the gateway process into the background as soon as `ssh` connects to the gateway. It is recommended that you do this, but you can only do this if you don't have to enter the password. If you have to enter in a password to connect to the gateway, using this option will make it difficult to put in the password since the process will be thrown into the background before you get the chance.  
+<nbsp/>  
+However, if you have setup a public/private key to the gateway system via [ssh-keygen](https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man1/ssh-keygen.1.html), and you don't have to enter a password or pass phrase to connect to the server, throwing the gateway tunnel into the background is very convenient.
 
-    Gives you the complete manpage for the `tnl` command.
+* `-user <user>`  
+(**Optional**) The name of the user to log into the gateway. By default, this will either be the current user, or the user configured in the [ssh configuration file](https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man5/ssh_config.5.html#//apple_ref/doc/man/5/ssh_config). Setting this will override the default user and the user configured in the ssh configuration file.
 
-# TUNNEL RESOURCE FILE
+* `-crypt <cipher_spec>`  
+(**Optional**) This is the cipher method to use in encrypting the data between your local host and the gateway machine. In most `ssh`, the default is `3des` which is DES encryption used with three different keys. See your [ssh manpage](https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man1/ssh.1.html) for more information.
 
-The Tunnel Reource File is located at "$HOME/.tnlrc" and consists of
-multiple lines. Each line can be either a __Gateway Description__ or a
-__System Description__.
+* `-port <port_num>`  
+(**Optional**) The port number used by the gateway's `sshd` daemon. Normally, this *should* be Port 22. However, certain companies block Port 22, and `sshd` has to operate over another port. By default, port 22 will be used.
 
-A __Gateway Description__ line must begin with `gateway:`) _Note the
-colon on the end of the string!_ A __System Description__ line must
-begin with `system:` _Note the colon on the end of the string!_.
+* `-debug <num_between_0_to_3>`
+(**Optional**) The debug level used when connecting. Zero (the default) means no debugging information is sent to STDERR. 1 means basic debugging information is sent, and the higher this number, the more debugging information is send to STDERR.
 
-After the `gateway:` or `system:` string is a set of parameters that
-configure either the system or the gateway. You need at least one
-__Gateway__ line. (Otherwise, why do you need to manage SSH Tunnels?) and
-at least one __System__ line. (Otherwise, what systems are you tunneling
-to?)
+### Systems
 
-## Gateway Configuration
+Systems are the systems you need to log into, but need to _tunnel_ through the gateway to get to the system.
 
-    gateway: -name gateway -system corgwy1.prod.local -user bsmith -port 2000
+Systems are configured in the same `$HOME/.tnlrc` file as the gateways. However, their lines begin with the word `system:` all in lower case and followed by a colon.
 
-A __Gateway__ system has the following parameters:
+Like gateways, after the `system:` string, you specify  various parameters using the same syntax used on the command line with parameters starting with one or two dashes followed by their value if a value (if there is one). Below is an example:
 
-- `-name`
+    system: -name database -system 10.50.244.21
+    
+The system name you use is `database`, but it connects to the system with the IP address of `10.50.224.21`. Once the gateway is started, you can log into `db32dt01` like this:
 
-    (_Required_) The name you are giving the gateway system.
+    $ tnl ssh database
+    
+#### System Parameters
 
-- `-system`
+The following are valid parameters for the system configuration:
 
-    (_Required_) The actual name of the system or its IP address.
+* `-name <name>`  
+(**Required**) The name you want to give the gateway. This is the way you will refer to the gateway. Think of it as an alias of the actual system name. The `<name>` can be the same as the system name, but it's always required.
 
-- `-start`
+* `-system <system_or_ip_address>`  
+(**Required**) This is the actual system name or its IP address.
 
-    (_Optional_) The starting port number to use for tunnelling. If this is 2000,
-    then the first system will tunnel through port 2000, the next defined one will
-    tunnel through port 2001, etc. Systems can override these settings by using
-    their own port number.
+* `-tunnel <port_num>`  
+(**Optional**) This is the port number you want to use for this particular system. Normally, you will let `tnl` figure out the ports to use since you don't have to know the ports to log into a particular system. However, if you want to force a mapping between a particular system and port, you can do it with this parameter.
 
-- `-crypt`
+* -`gateway <gateway_name>`  
+(**Optional**) Normally, when a gateway is started all systems not already with an active tunnel will be used by that gateway. However, there are times when you must match a particular system with a particular gateway. This parameter allows you to force an association between a gateway and a system.
 
-    (_Optional_) The cryptography type to use over the tunnel. The default
-    is `3des`\>.  This setting depends upon your system `ssh` command and
-    whether you are using Protocol 1 or Protocol 2. In Protocol 1, you can
-    only use a single cryptography method. In Protocol 2, you can use
-    multiple ones, each separated by a common.
+* `-crypt <cipher_spec>`  
+(**Optional**) This is the cipher method to use in encrypting the data between your local host and the gateway machine. In most `ssh`, the default is `3des` which is DES encryption used with three different keys. See your [ssh manpage](https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man1/ssh.1.html) for more information.
 
-- `-port`
+* `-port <port_num>`  
+(**Optional**) The port number used by the system's `sshd` daemon. Normally, this *should* be Port 22. However, certain companies block Port 22, and `sshd` has to operate over another port. By default, port 22 will be used.
 
-    (_Optional_) The port to use for the connection. Default is the default
-    SSH port 22.
+* `-debug <num_between_0_to_3>`
+(**Optional**) The debug level used when connecting. Zero (the default) means no debugging information is sent to STDERR. 1 means basic debugging information is sent, and the higher this number, the more debugging information is send to STDERR.
 
-- `-debug`
+* `-x11`  
+(**Optional**) Allow X11 protocol forwarding through this tunnel. This will allow X11 programs to display their GUI interface onto your local system.
 
-    (_Optional_) The debugging level for this connection. Valid values are
-    from 0 (for no debugging) to 3 (for maximum information). Default is 0.
+* `-user <user>`  
+(**Optional**) The name of the user to log into the system. By default, this will either be the current user, or the user configured in the [ssh configuration file](https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man5/ssh_config.5.html#//apple_ref/doc/man/5/ssh_config). Setting this will override the default user and the user configured in the ssh configuration file.  
 
-## System Configuration
 
-    system: -name build -system jenkins2.prod.local
-    system: -name depoly -system maven.prod.local -gateway gateway3
+***Note***: There is nothing stopping you from defining the same system with two different _alias_ names, and then using this parameter to force a login to a particular user. 
 
-- `-name`
+For example:
 
-    (_Required_) The name you are giving the system. This is the system
-    alias you need to use. You cannot use the system name.
+    system: -name build   -system bld01dt02
+    system: -name jenkins -system bld01dt02 -user jenkins
 
-- `-system`
+You could log into system `bld01dt02` as either:
 
-    The actual system name or its IP address.
+    $ tnl ssh build
+    
+which will log you in as the default user, or
 
-- `-user`
+    $ tnl ssh jenkins
+    
+which will log you in onto the same system, but this time as user _jenkins_.
 
-    The user you want to log in as. You may use the syntax C(<user@name>) to
-    override this.
+### Comment lines
 
-- `-gateway`
+In the `$HOME/.tnlrc` file, lines that start with `#` are considered comments.
 
-    This system must use this particular gateway. This allows you to have
-    multiple gateways installed and specify that a particular client can
-    only be on that gateway.
+## Sub-Commands
 
-- `-x11`
+`tnl` takes several sub-commands. Each command will start with `tnl`, then the sub-command, and finally a parameter if required.
 
-    Whether or not you want to tunnel X11 through this connection. This
-    parameter has no value after it.
+    $ tnl start <gateway>
+    
+Starts the gateway `<gateway>`. This command will go through the various systems configured in the `$HOME/.tnlrc` file, and see which ones do not have an active tunnel. Then, will start up those systems with this particular gateway (unless the system configuration ties that system to another gateway).
 
-- `-port`
+The systems will use the `-start` port number, as the first port up to the number of ports required for the tunneling. If a port is already mapped, another port will be selected. If a system _hard mapped_ to a particular port, that port will be used if it is not already taken.
 
-    The port you want to use for tunneling. This overrides the setting used
-    in the Gateway's `-start` parameter.
+    $ tnl stop <gateway>
+    
+Stops the tunneling process on `<gateway>` all active connections will be lost, and you must restart the gateway to connect to the various systems on the gateway.
 
-- `-crypt`
+    $ tnl ssh jenkins
+    
+Connects to the system you called `jenkins` using the configuration for that system. Note that you do not have to know the port number being used for the tunnel.
 
-    The crytography type you want to use for this connection. See your
-    system's _ssh manpage_ for the proper values to use.
+    $ tnl ls
+   
+List the various systems as configured. The output looks like this:
 
-- `-debug`
+    * Name       System          Port  User       Gateway         X11?  Debug Crypt
+    * jenkins    10.50.2.123     2001             Detroit         No          
+      maven      mvnwsdc02                        Washou          No          
+    * tj         10.50.2.123     2001  jenkins    Detroit         No          3des
 
-    (_Optional_) The debugging level for this connection. Valid values are
-    from 0 (for no debugging) to 3 (for maximum information). Default is 0.
+If a line starts with an asterisk, the tunnel for that system is active and you may log into it. The _Port_ is either the port that is hard coded into the configuration, or is the active tunneling port. The gateway is either the hard coded gateway in the `$HOME/.tnlrc` file or the gateway which is acting as the tunnel for that particular system.
 
-# BUGS
+In the above, the tunnel for `tj` and `jenkins` are active while the tunnel for `maven` is not. Note that both `tj` and `jenkins` both use Port 2001. They actually both go to the system with the IP address of 10.50.2.123, but one will use the default user and one will use _jenkins_ as the user name.
 
-- This command is heavily dependent upon the system's `ssh`
-command. A better version may use the Net::SSH::Perl.
-- This command does not verify the commands before sending them off
-to the system `ssh` command.
+    $ tnl lsgwy
+    
+Lists the gateways configured in the `$HOME/.tnlrc` file. The output looks like this:
 
-# AUTHOR
+    PID     Name             System           Start  Port   Crypt           Debug
+            washou           gwyws01          2000   22     3des            
+     24173  detroit          gwydr02          2000   22     3des
 
-David Weintraub <david@weintraub.name>
+The PID lists the active process ID of that system, and if it has a number in that column, the gateway is currently running.
 
-# COPYRIGHT
 
-Copyright © 2014 by the author, David Weintraub. All rights reserved. This
-program is covered by the open source BMAB license.
+    $ tnl help
+    
+Gives you the basic synopsis of the various `tnl` sub-commands.
+    
+    $ tnl tnlrc
+    
+Gives you information on setting up the _Tunnel Resource File_.
+    
+    $ tnl man`
+    
+Prints out the Complete Command Line Tunnel Manager Manpage
 
-The BMAB (Buy me a beer) license allows you to use all code for whatever reason
-you want with these three caveats:
+## Dependencies
 
-1. If you make any modifications in the code, please consider sending them to me,
-so I can put them into my code.  
-2. Give me attribution and credit on this
-program. 
-3. If you're in town, buy me a beer. Or, a cup of coffee which is what
-I'd prefer. Or, if you're feeling really spendthrify, you can buy me lunch. I
-promise to eat with my mouth closed and to use a napkin instead of my sleeves.
+* The program needs Perl 5.12 or higher installed.
+
+* This program depends upon the actual `ssh` command being in the `$PATH`. It uses the `ssh` command to do the actual connections. Future versions may use the Perl [Net::SSH](https://metacpan.org/pod/Net::SSH) in the future, but an attempt was made not to use optional modules.
+
+* This program uses the `pgrep` and `ps` commands and expects their flags to follow either the [BSD](https://en.wikipedia.org/wiki/Berkeley_Software_Distribution) or the [GNU](https://en.wikipedia.org/wiki/GNU) command line parameters. These commands must also be present and in the user's `$PATH`. Future versions of this program may use
+
+## Author
+
+David Weintraub david@weintraub.name (Yes, that is a valid email address).
+
+## Copyright
+
+CopyriCopyright &copy; 2014 by the author, David Weintraub. All rights reserved. This program is covered by the open source BMAB license.
+
+The BMAB (Buy me a beer) license allows you to use all code for whatever reason you want with these three caveats:
+
+1. If you make any modifications in the code, please consider sending them to me, so I can put them into my code.
+
+2. Give me attribution and credit on this program.
+
+3. If you're in town, buy me a beer. Or, a cup of coffee which is what I'd prefer. Or, if you're feeling really spendthrify, you can buy me lunch. I promise to eat with my mouth closed and to use a napkin instead of my sleeves.
+

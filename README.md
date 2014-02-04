@@ -86,9 +86,6 @@ This gateway is called `detroit` which is really system `gwydt01`. To start up t
 
 The following are valid parameters for the gateway configuration:
 
-* `-name <name>`  
-(**Required**) The name you want to give the gateway. This is the way you will refer to the gateway. Think of it as an alias of the actual system name. The `<name>` can be the same as the system name, but it's always required.
-
 * `-system <system_or_ip_address>`  
 (**Required**) This is the actual system name or its IP address.
 
@@ -96,6 +93,9 @@ The following are valid parameters for the gateway configuration:
 (**Required**) This is the starting tunnel port number. In most tunnel managers, you must map each system to a port, then remember that mapping. This program handles all of that for you. The first mapped tunnel takes this port number. The next one takes the next available port after this one, and so on.  
 <nbsp>  
 It may seem that things are even more difficult. How do I log onto a system if I don't know the port map? Again, it doesn't matter. With `tnl`, you connect via system name, and let the program figure out what port that system is mapped to.
+
+* `-name <name>`  
+(**Optional**) The name you want to give the gateway. This is the way you will refer to the gateway. Think of it as an alias of the actual system name. If the name is not given, the name will be set to whatever is `-system`  .
 
 * `-background`  
 (**Optional**) Put the gateway process into the background as soon as `ssh` connects to the gateway. You can't use this parameter if you need to enter a password. Instead, you must leave the terminal active, and be careful not to accidentally kill the background process.  
@@ -132,14 +132,14 @@ The system name you use is `database`, but it connects to the system `db32dt01`.
 
 The following are valid parameters for the system configuration:
 
-* `-name <name>`  
-(**Required**) The name you want to give the gateway. This is the way you will refer to the gateway. Think of it as an alias of the actual system name. The `<name>` can be the same as the system name, but it's always required.
-
 * `-system <system_or_ip_address>`  
 (**Required**) This is the actual system name or its IP address.
 
 * `-tunnel <port_num>`  
 (**Optional**) This is the port number you want to use for this particular system. Normally, you will let `tnl` figure out the ports to use since you don't have to know the ports to log into a particular system. However, if you want to force a mapping between a particular system and port, you can do it with this parameter.
+
+* `-name <name>`  
+(**Optional**) The name you want to give the gateway. This is the way you will refer to the gateway. Think of it as an alias of the actual system name. If the `-name` parameter is not passed, it will be the same as the `-system` name.
 
 * -`gateway <gateway_name>`  
 (**Optional**) Normally, when a gateway is started all systems not already with an active tunnel will be used by that gateway. However, there are times when you must match a particular system with a particular gateway. This parameter allows you to force an association between a gateway and a system.

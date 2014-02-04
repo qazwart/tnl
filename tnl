@@ -664,7 +664,13 @@ sub new {
 	"debug=i"	=> \$debug,
 	"background"	=> \$background,
     ) or return;
-    return if not defined $name or not defined $system;
+    if ( not defined $system and not defined $start_port ) {
+	croak( qq(Both "-system" and "-start" must be defined) );
+    }
+
+    if ( not defined $name ) {
+	$name = $system;		# Set name to system
+    }
 
     my $self = {};
     bless $self, $class;
@@ -782,9 +788,12 @@ sub new {
 	"debug=i"	=> \$debug,
     ) or return;
 
-    if ( not defined $name and not defined $system ) {
-	carp( qq(Must define both "-name" and "-system" parameters) );
-	return;
+    if ( not defined $system ) {
+	carp( qq(Must define "-system" parameters) );
+    }
+
+    if ( not defined $name ) {
+	$name = $system;	# If "name" isn't set, just make it system
     }
 
     my $self = {};

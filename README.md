@@ -26,12 +26,14 @@ Now if I want to log into `destsystem`, I can do so directly from `myhost`:
     
 There are several software programs that allow you to manage these tunnels. However, they all seem to share a few issues:
 
-* They can be a pain to setup. For some reason, I have to know the ports I want to use for tunneling. Why can't they figure that out for me.
-* When I do my tunneling, I have to remember which port tunnels to which remote systems.
-* Sometimes you have multiple gateways which can reach the same system. That way, if one gateway is down, you can use another. However, you don't want the same ports mapped to different gateways.
-* Many don't show you easily how machines are mapped to various ports.
+* They can be a pain to setup. You usually have to define a gateway, then give all the various systems for that gateway, filling in port numbers, names, etc.
+* Some systems make it very difficult to see the configuration. What port is my tunnel to my SQL DB machine connected to? You usually have to bring up the configuration dialog box over and over.
+* Even once you've set up the tunnels, you still have to remember how you mapped the various machines to port numbers.
+* Most tunnel handlers only concern themselves with the setup, but aren't very helpful with the connection.
 
-Thus, I developed this Tunnel Manager.
+I wanted a system of some intelligence. Where it will figure out the port mapping for me. Where I can tell it _I want to log into this system_ and it figures out how to do that. Where I copy, paste, and modify configurations. Where I can easily take the status of the gateways and tunnels.
+
+Thus, I created this tunnel manager.
 
 ## Overview
 
@@ -51,9 +53,22 @@ One you've finished, and no longer need the tunnel connection, you can shutdown 
 
 ## Setting Up the Tunnel Resource File
 
-All configuration is done by the Tunnel Resource File located at `$HOME/.tnlrc`. Both the systems you want to connect to and the gateways you're tunneling through are configured with this file. Being a plain text file means it's easy to copy, paste, and edit lines.
+All configuration is done by the Tunnel Resource File located at `$HOME/.tnlrc`. Both the systems you want to connect to and the gateways you're tunneling through are configured with this file. Being a plain text file means it's easy to copy, paste, and edit lines. 
 
-By having a plain text file, it becomes easy to duplcate configurations.
+By having a plain text file, it becomes easy to duplcate configurations. An example of one appears below:
+
+    #
+    # Gateways
+    #
+    gateway: -name detroit -system gtwdt1 -start 2000 -background
+    gateway: -name wasau -system gtwws3 -start 5000 -background
+    #
+    # Systems
+    #
+    system: -name maven -system 10.55.1.32 -gateway detroit
+    system: -name build -system bldws32
+    system: -name jenkins -user tomcat -system bldws32 -crypt 3des
+
 
 ### Gateways
 
@@ -78,12 +93,14 @@ The following are valid parameters for the gateway configuration:
 (**Required**) This is the actual system name or its IP address.
 
 * `-start <port_num>`  
-(**Required**) This is the starting port number. `tnl` normally does not require you to map systems you're tunneling to ports. Instead, `tnl` does this for you. This is the first port to use, and the first system for this gateway tunnel will be assigned this port. The next will be given the next port up, etc. You can force a mapping of systems to ports, but if you don't `tnl` will do it for you. Since you don't need to know the port of the system you're tunneling to, there is no need to map the ports yourself.
+(**Required**) This is the starting tunnel port number. In most tunnel managers, you must map each system to a port, then remember that mapping. This program handles all of that for you. The first mapped tunnel takes this port number. The next one takes the next available port after this one, and so on.  
+<nbsp>  
+It may seem that things are even more difficult. How do I log onto a system if I don't know the port map? Again, it doesn't matter. With `tnl`, you connect via system name, and let the program figure out what port that system is mapped to.
 
 * `-background`  
-(**Optional**) Put the gateway process into the background as soon as `ssh` connects to the gateway. It is recommended that you do this, but you can only do this if you don't have to enter the password. If you have to enter in a password to connect to the gateway, using this option will make it difficult to put in the password since the process will be thrown into the background before you get the chance.  
-<nbsp/>  
-However, if you have setup a public/private key to the gateway system via [ssh-keygen](https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man1/ssh-keygen.1.html), and you don't have to enter a password or pass phrase to connect to the server, throwing the gateway tunnel into the background is very convenient.
+(**Optional**) Put the gateway process into the background as soon as `ssh` connects to the gateway. You can't use this parameter if you need to enter a password. Instead, you must leave the terminal active, and be careful not to accidentally kill the background process.  
+<nbsp>  
+However, if you have setup [ssh-keygen](https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man1/ssh-keygen.1.html) and created a public/private key pair, you can connect to the tunnel without having to enter a password. Then, you can use this parameter which not only throws the gateway/tunnel process into the background, but also sets `nohup` to keep it running even if you delete that particular terminal session. It is highly recommended to setup `ssh-keygen`, and then to use this parameter.
 
 * `-user <user>`  
 (**Optional**) The name of the user to log into the gateway. By default, this will either be the current user, or the user configured in the [ssh configuration file](https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man5/ssh_config.5.html#//apple_ref/doc/man/5/ssh_config). Setting this will override the default user and the user configured in the ssh configuration file.
@@ -94,7 +111,7 @@ However, if you have setup a public/private key to the gateway system via [ssh-k
 * `-port <port_num>`  
 (**Optional**) The port number used by the gateway's `sshd` daemon. Normally, this *should* be Port 22. However, certain companies block Port 22, and `sshd` has to operate over another port. By default, port 22 will be used.
 
-* `-debug <num_between_0_to_3>`
+* `-debug <num_between_0_to_3>`  
 (**Optional**) The debug level used when connecting. Zero (the default) means no debugging information is sent to STDERR. 1 means basic debugging information is sent, and the higher this number, the more debugging information is send to STDERR.
 
 ### Systems
@@ -105,9 +122,9 @@ Systems are configured in the same `$HOME/.tnlrc` file as the gateways. However,
 
 Like gateways, after the `system:` string, you specify  various parameters using the same syntax used on the command line with parameters starting with one or two dashes followed by their value if a value (if there is one). Below is an example:
 
-    system: -name database -system 10.50.244.21
+    system: -name database -system db32dt01
     
-The system name you use is `database`, but it connects to the system with the IP address of `10.50.224.21`. Once the gateway is started, you can log into `db32dt01` like this:
+The system name you use is `database`, but it connects to the system `db32dt01`. Once the gateway is started, you can log into `db32dt01` like this:
 
     $ tnl ssh database
     
@@ -140,8 +157,7 @@ The following are valid parameters for the system configuration:
 (**Optional**) Allow X11 protocol forwarding through this tunnel. This will allow X11 programs to display their GUI interface onto your local system.
 
 * `-user <user>`  
-(**Optional**) The name of the user to log into the system. By default, this will either be the current user, or the user configured in the [ssh configuration file](https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man5/ssh_config.5.html#//apple_ref/doc/man/5/ssh_config). Setting this will override the default user and the user configured in the ssh configuration file.  
-
+(**Optional**) The name of the user to log into the system. By default, this will either be the current user, or the user configured in the [ssh configuration file](https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man5/ssh_config.5.html#//apple_ref/doc/man/5/ssh_config). Setting this will override the default user and the user configured in the ssh configuration file.
 
 ***Note***: There is nothing stopping you from defining the same system with two different _alias_ names, and then using this parameter to force a login to a particular user. 
 
@@ -186,10 +202,10 @@ Connects to the system you called `jenkins` using the configuration for that sys
    
 List the various systems as configured. The output looks like this:
 
-    * Name       System          Port  User       Gateway         X11?  Debug Crypt
-    * jenkins    10.50.2.123     2001             Detroit         No          
-      maven      mvnwsdc02                        Washou          No          
-    * tj         10.50.2.123     2001  jenkins    Detroit         No          3des
+    * Name       System          Port  User       Gateway  X11? Debug Crypt
+    * jenkins    10.50.2.123     2001             Detroit  No          
+      maven      mvnwsdc02                        Washou   No          
+    * tj         10.50.2.123     2001  jenkins    Detroit  No         3des
 
 If a line starts with an asterisk, the tunnel for that system is active and you may log into it. The _Port_ is either the port that is hard coded into the configuration, or is the active tunneling port. The gateway is either the hard coded gateway in the `$HOME/.tnlrc` file or the gateway which is acting as the tunnel for that particular system.
 
@@ -232,7 +248,7 @@ David Weintraub david@weintraub.name (Yes, that is a valid email address).
 
 ## Copyright
 
-CopyriCopyright &copy; 2014 by the author, David Weintraub. All rights reserved. This program is covered by the open source BMAB license.
+Copyright &copy; 2014 by the author, David Weintraub. All rights reserved. This program is covered by the open source BMAB license.
 
 The BMAB (Buy me a beer) license allows you to use all code for whatever reason you want with these three caveats:
 

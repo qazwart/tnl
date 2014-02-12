@@ -957,20 +957,21 @@ A B<Gateway> system has the following parameters:
 
 =over 4
 
-=item * C<-name>
-
-(I<Required>) The name you are giving the gateway system.
-
 =item * C<-system>
 
 (I<Required>) The actual name of the system or its IP address.
 
 =item * C<-start>
 
-(I<Optional>) The starting port number to use for tunnelling. If this is 2000,
+(I<Required>) The starting port number to use for tunnelling. If this is 2000,
 then the first system will tunnel through port 2000, the next defined one will
 tunnel through port 2001, etc. Systems can override these settings by using
 their own port number.
+
+=item * C<-name>
+
+(I<Optional>) The name you are giving the gateway system. If not given, will
+default to the system name.
 
 =item * C<-crypt>
 
@@ -1010,42 +1011,43 @@ the terminal window may still stop your gateway process.
 
    system: -name build -system jenkins2.prod.local
    system: -name depoly -system maven.prod.local -gateway gateway3
+   system: -system dp3gwpb
 
 =over 4
 
-=item * C<-name>
-
-(I<Required>) The name you are giving the system. This is the system
-alias you need to use. You cannot use the system name.
-
 =item * C<-system>
 
-The actual system name or its IP address.
+(I<Required>) The actual system name or its IP address.
 
 =item * C<-user>
 
 The user you want to log in as. You may use the syntax C(<user@name>) to
-override this.
+override this. Otherwise, the default ssh user will be used.
+
+=item * C<-name>
+
+(I<Optional>) The name you are giving the system. This is the system
+alias you need to use. You cannot use the system name.
 
 =item * C<-gateway>
 
-This system must use this particular gateway. This allows you to have
+(I<Optional>) This system must use this particular gateway. This allows you to have
 multiple gateways installed and specify that a particular client can
 only be on that gateway.
 
 =item * C<-x11>
 
-Whether or not you want to tunnel X11 through this connection. This
+(I<Optional>) Whether or not you want to tunnel X11 through this connection. This
 parameter has no value after it.
 
 =item * C<-port>
 
-The port you want to use for tunneling. This overrides the setting used
+(I<Optional>) The port you want to use for tunneling. This overrides the setting used
 in the Gateway's C<-start> parameter.
 
 =item * C<-crypt>
 
-The crytography type you want to use for this connection. See your
+(I<Optional>) The crytography type you want to use for this connection. See your
 system's I<ssh manpage> for the proper values to use.
 
 =item * C<-debug>

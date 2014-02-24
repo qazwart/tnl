@@ -374,6 +374,7 @@ sub new {
     my %systems;
     my %sys2name;
     my %gwy2name;
+    my @systems;        # Need to keep system in order defined
 
     while ( my $line = $tnlrc_fh->getline ) {
 	chomp $line;
@@ -411,6 +412,9 @@ sub new {
 		);
 	    }
 	    $systems{$system_name} = $system;
+            if ( not exists $sys2name{ $system->System } ) {
+                push @systems, $system->System;
+            }
 	    push @{ $sys2name{ $system->System } }, $system_name;
 	}
 	else {
@@ -421,10 +425,11 @@ sub new {
 	}
     }
 
-    $self->Sys2name( \%sys2name ); # Add System to Name reverse lookup
-    $self->Gwy2name( \%gwy2name ); # Add Gateway to Name reverse lookup
-    $self->Gateway( \%gateways ); # Add gateways to object
-    $self->System( \%systems );   # Add systems to object;
+    $self->System_array( \@systems );   # Add Systems Array to object
+    $self->Sys2name( \%sys2name );      # Add System to Name reverse lookup
+    $self->Gwy2name( \%gwy2name );      # Add Gateway to Name reverse lookup
+    $self->Gateway( \%gateways );       # Add gateways to object
+    $self->System( \%systems );         # Add systems to object;
     $self->Active;
 
     return $self;
@@ -447,6 +452,17 @@ sub Gwy2name {
     my $self		= shift;
     my $gwy2name	= shift;
     return $self->_Alias( "gwy2name", $gwy2name );
+}
+
+sub System_array {
+    my $self            = shift;
+    my $systems_ref     = shift;
+
+    if ( defined $systems_ref ) {
+        $self->{SYSTEM_ARRAY} = $systems_ref;
+    }
+    my @systems = @{ $self->{SYSTEM_ARRAY} };
+    return wantarray ? @systems : \@systems;
 }
 
 sub System {
@@ -636,6 +652,7 @@ sub Active {
 
 package Local::Tunnel::Gateway;
 use base qw(Local::Tunnel::Common);
+use Data::Dumper;
 
 use Getopt::Long qw(GetOptionsFromString);
 

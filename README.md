@@ -242,6 +242,43 @@ Prints out the Complete Command Line Tunnel Manager Manpage
 
 * This program uses the `pgrep` and `ps` commands and expects their flags to follow either the [BSD](https://en.wikipedia.org/wiki/Berkeley_Software_Distribution) or the [GNU](https://en.wikipedia.org/wiki/GNU) command line parameters. These commands must also be present and in the user's `$PATH`. Future versions of this program may use
 
+##Bugs (I mean _Features_)
+
+One of the things that SSH uses is the `known_hosts` file to track what hosts are mapped to particular host keys. Because of this file, changing the port mapping can cause problems with this program. You may see a warning like this:
+
+    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    @    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+    Someone could be eavesdropping on you right now (man-in-the-middle attack)!
+    It is also possible that a host key has just been changed.
+    The fingerprint for the RSA key sent by the remote host is
+    xx:xx:xx:xx:xx...
+    Please contact your system administrator.
+    Add correct host key in $HOME/.ssh/known_hosts to get rid of this message.
+    Offending RSA key in $HOME/.ssh/known_hosts:1
+    RSA host key for [localhost]:2000 has changed and you have requested strict  checking.
+    Host key verification failed.
+
+This can be caused by the systems you're tunneling to being remapped to alternate ports. The known host maps IP addresses, system names, etc. to _system fingerprints_. This makes it hard for a _man in the middle_ attack where an intruder is pretending to be another system. When you use SSH, it checks known hosts against their finger print in the `$HOME/.ssh/known_hosts` file. If this is different, you will get this warning.
+
+This can happen because tunneled hosts are not mapped to their IP address or host name, but by the port number used by the tunnel. You change the ports that a particular host goes to, and you'll get the above error.
+
+For example, let's say that `foo01` is mapped to port `2000` and `foo02` is mapped to port `2001`. Your `known_hosts` file will look something like this:
+
+    [localhost]:2000 <The fingerprint for foo01>
+    [localhost]:2001 <The fingerprint for foo02>
+    
+Now, if these get remapped, so `foo01` is using port `2001` instead of `2000`, and you attempt to log into `foo01`, SSH will look at the second line and see that host `foo01` has a different finger print from the previous host that mapped to port `2000`.
+
+Of course, the whole idea was to let this program handle the port mapping, so how do you know what ports will be used?
+
+This program attempts to assign the ports in the order that the systems appear in the `.tnlrc` file. If you add new systems to the _end_ of the `.tnlrc`, you should be okay. If you delete systems from the file, or add new systems to the middle of the file, you can end up causing mapping confusion. If this happens, delete the line in the `known_hosts` file that is causing problems, and allow the `known_hosts` file to remap that system.
+
+Or, you can use the `-port` parameter on the system lines to force a particular system to be on a particular port. This will always prevent port remapping. However, it does mean that you have to maintain your own tunnel mapping.
+
+I will attempt to fix this in a later version of this program as soon as I can figure out a way around this problem.
+
 ## Author
 
 David Weintraub david@weintraub.name (Yes, that is a valid email address).

@@ -72,6 +72,7 @@ sub start_gateway {
     # Now Build the Gateway Command: First find all systems that aren't active
     #
     my $tnl_command;
+    my @system_names = $tnl->System_array;
     my %systems = $tnl->System;
     my $next_port = $gateway_obj->Start_port;
     #
@@ -88,7 +89,7 @@ sub start_gateway {
     #
     my %systems_to_activate;
     my %systems_ports; # These are the ports you have to use
-    for my $system_name ( keys %systems ) {
+    for my $system_name ( @system_names ) {
 	my $system_obj = $systems{ $system_name };
 	next if $system_obj->Active;
 	next if defined $system_obj->Gateway
@@ -374,7 +375,7 @@ sub new {
     my %systems;
     my %sys2name;
     my %gwy2name;
-    my @systems;        # Need to keep system in order defined
+    my @system_names;    # Need to keep system in order defined
 
     while ( my $line = $tnlrc_fh->getline ) {
 	chomp $line;
@@ -412,9 +413,7 @@ sub new {
 		);
 	    }
 	    $systems{$system_name} = $system;
-            if ( not exists $sys2name{ $system->System } ) {
-                push @systems, $system->System;
-            }
+            push @system_names, $system->Name;
 	    push @{ $sys2name{ $system->System } }, $system_name;
 	}
 	else {
@@ -425,7 +424,7 @@ sub new {
 	}
     }
 
-    $self->System_array( \@systems );   # Add Systems Array to object
+    $self->System_array( \@system_names );   # Add Systems Array to object
     $self->Sys2name( \%sys2name );      # Add System to Name reverse lookup
     $self->Gwy2name( \%gwy2name );      # Add Gateway to Name reverse lookup
     $self->Gateway( \%gateways );       # Add gateways to object
@@ -714,51 +713,6 @@ sub Start_port {
     return $self->{START_PORT};
 }
 
-sub System2name {
-    my $self		= shift;
-    my $system		= shift;
-    my $name		= shift;
-
-    if ( not defined $system ) {
-	return %{ $self->{SYSTEM} };
-    }
-
-    if ( defined $system and defined $name ) {
-	$self->{SYSTEM}->{$system} = $name;
-	$self->Name2system( $name, $system );
-    }
-    return $self->{SYSTEM}->{$system};
-}
-
-sub Name2system {
-    my $self		= shift;
-    my $name		= shift;
-    my $system		= shift;
-
-    if ( not defined $name ) {
-	return %{ $self->{SYSTEM_NAME} };
-    }
-    if ( defined $name and defined $system ) {
-	$self->{SYSTEM_NAME}->{$name} = $system;
-    }
-    return $self->{SYSTEM_NAME}->{$name};
-}
-
-sub Name2Port {
-    my $self		= shift;
-    my $name		= shift;
-    my $port		= shift;
-
-    if ( not defined $name ) {
-	return %{ $self->{NAME_PORT} };
-    }
-
-    if ( defined $name and defined $port ) {
-	$self->{NAME_PORT}->{$name} = $port;
-    }
-    return $self->{NAME_PORT}->{$name};
-}
-
 sub Pid {
     my $self		= shift;
     my $pid		= shift;
@@ -1010,7 +964,7 @@ from 0 (for no debugging) to 3 (for maximum information). Default is 0.
 
 =item * C<-background>
 
-(I<Optional) Start the gateway in the background. You can do this if you
+(I<Optional>) Start the gateway in the background. You can do this if you
 have setup a public/private key for the tunnel. Otherwise, you'll have
 to start the tunnel in the foreground, so you can enter the password.
 
@@ -1084,7 +1038,31 @@ command. A better version may use the Net::SSH::Perl.
 =item * This command does not verify the commands before sending them off
 to the system C<ssh> command.
 
+=item * When you add new systems to the C<.tnlrc> file, it can cause
+ports to be remapped from one system to another. This can cause C<ssh>
+to be confused when matching system names against the
+C<$HOME/.ssh/known_hosts> file. There are two ways to handle this issue:
+
+=over 4
+
+=item * Add new systems to the end of the C<.tnlrc> file. The C<tnl>
+program attempts to assign ports in the order that the systems are found
+in the C<.tnlrc> file. As long as new systems are added to the end of
+the file, and old systems are not deleted from the middle of the file,
+the ports will map correctly.
+
+=item * Use the C<-port> parameter on system configuration lines to
+define the port to the particular system. This will force a
+port-to-system mapping that will prevent systems from being remapped to
+a different port.
+
 =back
+
+You can always delete the offending line(s) in the C<known_hosts> file,
+or manually change the port mapping if you need to.
+
+=back
+
 
 =head1 AUTHOR
 

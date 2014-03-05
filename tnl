@@ -23,6 +23,13 @@ use constant {
 	#)x,
 
 };
+
+use constant {
+    GATEWAY_LINE	=> qr/^gateway:\s*/,
+    SYSTEM_LINE		=> qr/^system:\s*/,
+    PGREP_RE 		=> 'ssh.*-L',
+    PS_COMMAND		=> 'ps -o command=""',
+};
 #
 ########################################################################
 
@@ -40,7 +47,7 @@ elsif ( $command eq "ssh"   )	{ connect_system( "ssh",  $system ); }
 elsif ( $command eq "sftp"  )	{ connect_system( "sftp", $system ); }
 elsif ( $command eq "ls"    )	{ list_systems();   }
 elsif ( $command eq "lsgwy" ) 	{ list_gateways();  }
-elsif ( $command eq "scp"   )   { secure_copy ( $system, $file_for_scp ) }
+elsif ( $command eq "scp"   )   { secure_copy ( $system, $file_for_scp ); }
 #
 # Help!
 #
@@ -179,6 +186,7 @@ sub start_gateway {
     if ( $gateway_obj->Background ) {
 	list_systems();
     }
+    rewrite_tnlrc_file( TNLRC );
 }
 
 #
@@ -400,6 +408,7 @@ sub list_systems {
 	    $gateway, $x11, $entry->Debug, $entry->Crypt;
 	use warnings qw(uninitialized);
     }
+    return 1;
 }
 
 #
@@ -425,7 +434,78 @@ sub list_gateways {
 }
 
 ########################################################################
-# PACKAGE Local::Tunnel
+# subroutine rewrite_tnlrc_file
+#
+
+# This program rewrites the tnlrc file by adding `-port <portNum>` to the
+# system lines that are currently active and have a port associated with
+# them
+#
+#
+#
+
+sub rewrite_tnlrc_file {
+    my $tnlrc_file      = shift;
+
+    use File::stat;
+    use IO::File;
+    use File::Copy;
+
+    my $tnl = Local::Tunnel->new( $tnlrc_file );
+
+    #
+    # Let's get a listing of system names to ports
+    #
+    my %ports;
+    my %systems = $tnl->System;
+    for my $system ( keys %systems ) {
+        next unless $systems{$system}->Active;   # Only systems that are currently active
+        my $port = $systems{$system}->Tunnel_port;
+        next unless $port;                      # Only systems that have known ports;
+        my $name = $systems{$system}->Name;
+        $ports{$name} = $port;
+    }
+
+    my $new_tnlrc_file = "$tnlrc_file" . ".new";
+    my $tnlrc_stat = stat $tnlrc_file;
+    my $mode = sprintf "%04o", $tnlrc_stat->mode; # Get mode of old file
+
+    my $old_tnlrc = IO::File->new($tnlrc_file, "r");
+    my $new_tnlrc = IO::File->new("$tnlrc_file.new", "w", $mode);
+
+    while ( my $line = $old_tnlrc->getline ) {
+        chomp $line;
+        if    ( $line !~ SYSTEM_LINE ) {        # Ignore all lines unless for system
+            $new_tnlrc->say( "$line" );
+        }
+        elsif ( $line =~ /-+port\s/ ) {      # Port already on the line
+            $new_tnlrc->say( "$line" );
+        }
+        #
+        # No port on the line: See if we have it in the system
+        #
+        else {
+            my $system_name;
+            if ( $line =~ /\s-+name\s+(\S+)/ ) {
+                $system_name = $1;
+            }
+            elsif ( $line =~ /\s-+system\s+(\S+)/ ) { # May not have a -name, use -system
+                $system_name = $1;
+            }
+            $new_tnlrc->say("$line -port $ports{$system_name}");
+        }
+    }
+    $old_tnlrc->close;
+    $new_tnlrc->close;
+    move $tnlrc_file, "$tnlrc_file.backup"
+        or warn qq(Could not move "$tnlrc_file" to "$tnlrc_file.backup".);
+    move $new_tnlrc_file, $tnlrc_file
+        or die qq(Could not move "$new_tnlrc_file" to "$tnlrc_file".);
+    return;
+}
+
+########################################################################
+#PACKAGE Local::Tunnel
 #
 # Read in the Tunnel Resource as an object you can parse
 #
@@ -433,14 +513,15 @@ package Local::Tunnel;
 
 use Data::Dumper;
 use Carp;
+
+use IO::File;
+
 use constant {
     GATEWAY_LINE	=> qr/^gateway:\s*/,
     SYSTEM_LINE		=> qr/^system:\s*/,
     PGREP_RE 		=> 'ssh.*-L',
     PS_COMMAND		=> 'ps -o command=""',
 };
-
-use IO::File;
 
 sub new {
     my $class		= shift;
@@ -451,7 +532,7 @@ sub new {
 
     my $tnlrc_fh;
     if ( not $tnlrc_fh = IO::File->new("$file", "r") ) {
-	croak qq(Cannot open .tnlrc file "$file");
+        croak qq(Cannot open .tnlrc file "$file");
     }
 
     #
@@ -464,50 +545,50 @@ sub new {
     my @system_names;    # Need to keep system in order defined
 
     while ( my $line = $tnlrc_fh->getline ) {
-	chomp $line;
-	next if $line =~ /^\s*#/;	# Comment Line
-	if ( $line =~ s/@{[GATEWAY_LINE]}// ) {
-	    my $gateway;
-	    if ( not $gateway = Local::Tunnel::Gateway->new($line) ) {
-		croak( qq(Error in tnlrc file "$file" line )
-		    . $tnlrc_fh->input_line_number
-		    . qq(: Invalid gateway line "$line") );
-	    }
-	    my $gateway_name = $gateway->Name;
-	    if ( exists $gateways{$gateway_name} ) {
-		croak( qq(Error in tnlrc file "$file" line )
-		    . $tnlrc_fh->input_line_number
-		    . qq(: Gateway "$gateway_name" already defined.)
-		);
-	    }
-	    $gateways{$gateway_name} = $gateway;
-	    $gwy2name{ $gateway->System } = $gateway_name;
-	}
-	elsif ( $line =~ s/@{[SYSTEM_LINE]}// ) {
-	    my $system;
-	    if ( not $system = Local::Tunnel::System->new($line) ) {
-		croak( qq(Error in tnlrc file "$file" line )
-		    . $tnlrc_fh->input_line_number
-		    . qq(: Invalid system line "$line") );
-	    }
+        chomp $line;
+        next if $line =~ /^\s*#/;	# Comment Line
+        if ( $line =~ s/@{[GATEWAY_LINE]}// ) {
+            my $gateway;
+            if ( not $gateway = Local::Tunnel::Gateway->new($line) ) {
+                croak( qq(Error in tnlrc file "$file" line )
+                    . $tnlrc_fh->input_line_number
+                    . qq(: Invalid gateway line "$line") );
+            }
+            my $gateway_name = $gateway->Name;
+            if ( exists $gateways{$gateway_name} ) {
+                croak( qq(Error in tnlrc file "$file" line )
+                    . $tnlrc_fh->input_line_number
+                    . qq(: Gateway "$gateway_name" already defined.)
+                );
+            }
+            $gateways{$gateway_name} = $gateway;
+            $gwy2name{ $gateway->System } = $gateway_name;
+        }
+        elsif ( $line =~ s/@{[SYSTEM_LINE]}// ) {
+            my $system;
+            if ( not $system = Local::Tunnel::System->new($line) ) {
+                croak( qq(Error in tnlrc file "$file" line )
+                    . $tnlrc_fh->input_line_number
+                    . qq(: Invalid system line "$line") );
+            }
 
-	    my $system_name = $system->Name;
-	    if ( exists $systems{$system_name} ) {
-		croak( qq(Error in tnlrc file "$file" line )
-		    . $tnlrc_fh->input_line_number
-		    . qq(: System name "$system_name" already defined.)
-		);
-	    }
-	    $systems{$system_name} = $system;
+            my $system_name = $system->Name;
+            if ( exists $systems{$system_name} ) {
+                croak( qq(Error in tnlrc file "$file" line )
+                    . $tnlrc_fh->input_line_number
+                    . qq(: System name "$system_name" already defined.)
+                );
+            }
+            $systems{$system_name} = $system;
             push @system_names, $system->Name;
-	    push @{ $sys2name{ $system->System } }, $system_name;
-	}
-	else {
-	    croak( qq(Error in tnlrc file "$file" line )
-		. $tnlrc_fh->input_line_number
-		. qq(: Invalid line "$line".)
-	    );
-	}
+            push @{ $sys2name{ $system->System } }, $system_name;
+        }
+        else {
+            croak( qq(Error in tnlrc file "$file" line )
+                . $tnlrc_fh->input_line_number
+                . qq(: Invalid line "$line".)
+            );
+        }
     }
 
     $self->System_array( \@system_names );   # Add Systems Array to object
@@ -564,12 +645,12 @@ sub _Alias {
     my $valid_alias = qr/^(gateway|system|sys2name|gwy2name)$/;
 
     if ( not defined $type or $type !~ $valid_alias ) {
-	croak( qq(Invalid method call. Type must be "system", "sys2name", "gwy2name", or "gateway".) );
+        croak( qq(Invalid method call. Type must be "system", "sys2name", "gwy2name", or "gateway".) );
     }
 
     if ( not defined $alias ) {
-	my $hash_key = uc $type . "S";
-	return %{ $self->{ $hash_key } };
+        my $hash_key = uc $type . "S";
+        return %{ $self->{ $hash_key } };
     }
 
     #
@@ -577,19 +658,19 @@ sub _Alias {
     #
     my $hash_key = uc $type . "S";
     if ( ref $alias eq "HASH" ) { # Replacing everything with this hash
-	 $self->{ $hash_key } = $alias;
-	return $self;
+        $self->{ $hash_key } = $alias;
+        return $self;
     }
 
     #
     # The parameter should now be a string
     #
     elsif ( ref \$alias eq "SCALAR" ) {
-	return $self->{ $hash_key }->{$alias};
+        return $self->{ $hash_key }->{$alias};
     }
     else {
-	croak( qq(Invalid call to Method:)
-	    . qq( Must pass in $type name or hash ref of ${type}s) );
+        croak( qq(Invalid call to Method:)
+            . qq( Must pass in $type name or hash ref of ${type}s) );
     }
     return $self;
 }
@@ -608,45 +689,45 @@ sub Active {
 
     PID:
     for my $pid ( qx( pgrep -f "ssh.*-L" ) ) {
-	chomp $pid;
-	#
-	# Find Command Line for this PID
-	#
-	my $command_line = qx( @{[PS_COMMAND]} $pid );
-	chomp $command_line;
-	#
-	# Command line will be "ssh -sss sss -sss sss user@gateway -L system -L system ....
-	# So, I can use split along the -L and get the systems.
-	# However, the first one will contain the gateway and not the system.
-	#
-	my @active_systems = split /\s*-L\s*/, $command_line;
-	my $gateway = shift @active_systems;
-	$gateway =~ s/^.*\s+//;		# Gateway, but may have user name too.
-	$gateway =~ s/.*\@//;		# Remove the user name if it was there.
-	my $gateway_name = $tnl->Gwy2name( $gateway );
-	next PID unless $gateway_name;
-	my $gateway_obj = $tnl->Gateway( $gateway_name );
-	next PID unless $gateway_obj;
-	$gateway_obj->Pid($pid);
-	#
-	# Now find the systems, mark them as active, and set their port and
-	# gateway
-	#
-	SYSTEM:
-	for my $active_system ( @active_systems ) {
-	    my ( $tunnel_port, $system ) = split /\//, $active_system;
-	    my $names_ref = $tnl->Sys2name( $system );
-	    next SYSTEM unless $names_ref;
-	    my @names = @{ $names_ref };
-	    SYSTEM_NAME:
-	    for my $name ( @names ) {
-		my $system_obj = $tnl->System( $name );
-		next SYSTEM_NAME unless $system_obj;
-		$system_obj->Tunnel_port($tunnel_port);
-		$system_obj->Active(1);
-		$system_obj->Gateway($gateway_obj->Name);
-	    }
-	}
+        chomp $pid;
+        #
+        # Find Command Line for this PID
+        #
+        my $command_line = qx( @{[PS_COMMAND]} $pid );
+        chomp $command_line;
+        #
+        # Command line will be "ssh -sss sss -sss sss user@gateway -L system -L system ....
+        # So, I can use split along the -L and get the systems.
+        # However, the first one will contain the gateway and not the system.
+        #
+        my @active_systems = split /\s*-L\s*/, $command_line;
+        my $gateway = shift @active_systems;
+        $gateway =~ s/^.*\s+//;		# Gateway, but may have user name too.
+        $gateway =~ s/.*\@//;		# Remove the user name if it was there.
+        my $gateway_name = $tnl->Gwy2name( $gateway );
+        next PID unless $gateway_name;
+        my $gateway_obj = $tnl->Gateway( $gateway_name );
+        next PID unless $gateway_obj;
+        $gateway_obj->Pid($pid);
+        #
+        # Now find the systems, mark them as active, and set their port and
+        # gateway
+        #
+        SYSTEM:
+        for my $active_system ( @active_systems ) {
+            my ( $tunnel_port, $system ) = split /\//, $active_system;
+            my $names_ref = $tnl->Sys2name( $system );
+            next SYSTEM unless $names_ref;
+            my @names = @{ $names_ref };
+            SYSTEM_NAME:
+            for my $name ( @names ) {
+                my $system_obj = $tnl->System( $name );
+                next SYSTEM_NAME unless $system_obj;
+                $system_obj->Tunnel_port($tunnel_port);
+                $system_obj->Active(1);
+                $system_obj->Gateway($gateway_obj->Name);
+            }
+        }
     }
     return;
 }
@@ -664,7 +745,7 @@ sub Name {
     my $name		= shift;
 
     if ( defined $name ) {
-	$self->{NAME} = $name;
+        $self->{NAME} = $name;
     }
     return $self->{NAME};
 }
@@ -674,7 +755,7 @@ sub System {
     my $system		= shift;
 
     if ( defined $system ) {
-	$self->{SYSTEM} = $system;
+        $self->{SYSTEM} = $system;
     }
     return $self->{SYSTEM};
 }
@@ -684,7 +765,7 @@ sub User {
     my $user		= shift;
 
     if ( defined $user ) {
-	$self->{USER} = $user;
+        $self->{USER} = $user;
     }
     return $self->{USER};
 }
@@ -694,7 +775,7 @@ sub Crypt {
     my $crypt		= shift;
 
     if ( defined $crypt ) {
-	$self->{CRYPT} = $crypt;
+        $self->{CRYPT} = $crypt;
     }
     return $self->{CRYPT};
 }
@@ -704,7 +785,7 @@ sub Port {
     my $port		= shift;
 
     if ( defined $port ) {
-	$self->{PORT} = $port;
+        $self->{PORT} = $port;
     }
     return $self->{PORT}
 }
@@ -714,13 +795,13 @@ sub Debug {
     my $debug_level	= shift;
 
     if ( defined $debug_level ) {
-	if ( $debug_level !~ /^\d+$/ ) {
-	    croak( qq(Debug must be an integer between 0 to 3) );
-	}
-	if ( $debug_level > 3 ) {
-	    $debug_level = 3;
-	}
-	$self->{DEBUG_LEVEL} = $debug_level;
+        if ( $debug_level !~ /^\d+$/ ) {
+            croak( qq(Debug must be an integer between 0 to 3) );
+        }
+        if ( $debug_level > 3 ) {
+            $debug_level = 3;
+        }
+        $self->{DEBUG_LEVEL} = $debug_level;
     }
     return $self->{DEBUG_LEVEL};
 }
@@ -730,7 +811,7 @@ sub Active {
     my $active		= shift;
 
     if ( defined $active ) {
-	$self->{ACTIVE} = 1;
+        $self->{ACTIVE} = 1;
     }
     return $self->{ACTIVE};
 }
@@ -757,21 +838,21 @@ sub new {
     my $port 		= DEFAULT_SSH_PORT;
 
     GetOptionsFromString( $line,
-	"name=s"	=> \$name,
-	"system=s"	=> \$system,
-	"user=s"	=> \$user,
-	"start=i"	=> \$start_port,
-	"crypt=s"	=> \$crypt,
-	"port=i"	=> \$port,
-	"debug=i"	=> \$debug,
-	"background"	=> \$background,
+        "name=s"	=> \$name,
+        "system=s"	=> \$system,
+        "user=s"	=> \$user,
+        "start=i"	=> \$start_port,
+        "crypt=s"	=> \$crypt,
+        "port=i"	=> \$port,
+        "debug=i"	=> \$debug,
+        "background"	=> \$background,
     ) or return;
     if ( not defined $system and not defined $start_port ) {
-	croak( qq(Both "-system" and "-start" must be defined) );
+        croak( qq(Both "-system" and "-start" must be defined) );
     }
 
     if ( not defined $name ) {
-	$name = $system;		# Set name to system
+        $name = $system;		# Set name to system
     }
 
     my $self = {};
@@ -794,7 +875,7 @@ sub Start_port {
     my $start_port	= shift;
 
     if ( defined $start_port ) {
-	$self->{START_PORT} = $start_port;
+        $self->{START_PORT} = $start_port;
     }
     return $self->{START_PORT};
 }
@@ -804,7 +885,7 @@ sub Pid {
     my $pid		= shift;
 
     if ( defined $pid ) {
-	$self->{PID} = $pid;
+        $self->{PID} = $pid;
     }
     return $self->{PID};
 }
@@ -813,7 +894,7 @@ sub Background {
     my $self		= shift;
     my $background	= shift;
     if ( defined $background ) {
-	$self->{BACKGROUND} = $background;
+        $self->{BACKGROUND} = $background;
     }
     return $self->{BACKGROUND};
 }
@@ -834,23 +915,23 @@ sub new {
 
     my ( $name, $system, $user, $x11, $port, $tunnel_port, $crypt, $debug, $gateway);
     GetOptionsFromString( $line,
-	"name=s"	=> \$name,
-	"system=s"	=> \$system,
-	"user=s"	=> \$user,
-	"gateway=s"	=> \$gateway,
-	"x11"		=> \$x11,
-	"port=i"	=> \$port,
-	"tunnel=i"	=> \$tunnel_port,
-	"crypt=s"	=> \$crypt,
-	"debug=i"	=> \$debug,
+        "name=s"	=> \$name,
+        "system=s"	=> \$system,
+        "user=s"	=> \$user,
+        "gateway=s"	=> \$gateway,
+        "x11"		=> \$x11,
+        "port=i"	=> \$port,
+        "tunnel=i"	=> \$tunnel_port,
+        "crypt=s"	=> \$crypt,
+        "debug=i"	=> \$debug,
     ) or return;
 
     if ( not defined $system ) {
-	carp( qq(Must define "-system" parameters) );
+        carp( qq(Must define "-system" parameters) );
     }
 
     if ( not defined $name ) {
-	$name = $system;	# If "name" isn't set, just make it system
+        $name = $system;	# If "name" isn't set, just make it system
     }
 
     my $self = {};
@@ -868,13 +949,13 @@ sub new {
 
     return $self;
 }
-    
+
 sub X11 {
     my $self		= shift;
     my $x11		= shift;
 
     if ( defined $x11 ) {
-	$self->{X11} = 1;
+        $self->{X11} = 1;
     }
     return $self->{X11};
 }
@@ -884,7 +965,7 @@ sub Gateway {
     my $gateway		= shift;
 
     if ( defined $gateway ) {
-	$self->{GATEWAY} = $gateway;
+        $self->{GATEWAY} = $gateway;
     }
     return $self->{GATEWAY};
 }
@@ -894,7 +975,7 @@ sub Tunnel_port {
     my $tunnel_port	= shift;
 
     if ( defined $tunnel_port ) {
-	$self->{TUNNEL_PORT} = $tunnel_port;
+        $self->{TUNNEL_PORT} = $tunnel_port;
     }
     return $self->{TUNNEL_PORT};
 }

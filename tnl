@@ -996,6 +996,8 @@ tnl
     $ tnl start gatwy1        # Starts tunnel
     $ tnl ssh tomcat@syssrv3  # Logs in as user "tomcat" on system you called "syssrv3"
     $ tnl ssh jenkins         # Logs into on system you call Jenkins as current user
+    $ tnl scp foo:myfile .    # Copies a file called "myfile" from system "foo" to the current directory
+    $ tnl sftp jenkin         # Starts an SFTP session to system Jenkins
     $ tnl lsgwy               # Shows gateways and status
     $ tnl ls           	      # Shows configured systems as for that gateway
     $ tnl stop gatwy3         # Stops the tunnel gatwy3
@@ -1057,6 +1059,18 @@ names for the same system.
 Same as the above, but forces the system to log you in as user <user>
 instead of the user defined for <name>.
 
+=item * C<< tnl sftp <user>@<name> >>
+
+Starts an Secured FTP session to the sytem <name>. If the user name is
+not given, it will use the default name, or the name configured in the
+C<.tnlrc> file.
+
+=item * C<< tnl scp <file1> <file2> >>
+
+Does a Secure copy of C<file1> to C<file2>. A file may contain the
+system name and user name followed by a colon. The format of this
+command is very similar to the standard C<scp> command.
+
 =item * C<tnl help>
 
 Shows the synopsis on using the C<tnl> command.
@@ -1086,6 +1100,19 @@ configure either the system or the gateway. You need at least one
 B<Gateway> line. (Otherwise, why do you need to manage SSH Tunnels?) and
 at least one B<System> line. (Otherwise, what systems are you tunneling
 to?)
+
+=over 10
+
+=item B<NOTE:>
+
+The .tnlrc file is rewritten when you start up a gateway. Any system
+that does not have a defined port will be given a C<-port> parameter
+with the current port assigned to that system. This way, if you modify
+the C<.tnlrc> file, you don't modify the ports that a system is assigned
+to. This way, your C<known_systems> file doesn't complain because a a
+particular system is now assigned to a port of another system.
+
+=back 
 
 =head2 Gateway Configuration
 

@@ -198,6 +198,14 @@ Stops the tunneling process on `<gateway>` all active connections will be lost, 
     
 Connects to the system you called `jenkins` using the configuration for that system. Note that you do not have to know the port number being used for the tunnel.
 
+    $ tnl sftp jenkins
+    
+Starts an FTP session with system `jenkins`. `tnl` will log in with the default user name, or you can specify a user name on the command line just line you would with the standard `sftp` command.
+
+	$ tnl scp jenkins:.profile .
+	
+Runs `scp` to copy the file `.profile` from system `jenkins` to the current directory. The syntax of the command is similar to the standard `scp` command. If you specify no user name, it will log in with either the default user, or with the user name defined in the `.tnlrc` file for this system.
+
     $ tnl ls
    
 List the various systems as configured. The output looks like this:

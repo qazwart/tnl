@@ -26,10 +26,9 @@ use constant {
 #
 ########################################################################
 
-my $command 	= shift;
-my $system 	= shift; 
-
-# my $tnl = Local::Tunnel->new( TNLRC );
+my $command 	        = shift;
+my $system 	        = shift;        # Maybe a file for scp...
+my $file_for_scp        = shift;
 
 if ( not defined $command ) {
     die qq(No subcommand given. Type "tnl help" for help\n);
@@ -37,10 +36,11 @@ if ( not defined $command ) {
 
 if    ( $command eq "start" )	{ start_gateway( $system );  }
 elsif ( $command eq "stop"  )	{ stop_gateway( $system );   }
-elsif ( $command eq "ssh"   )	{ connect_system( $system ); }
-#elsif ( $command eq "on"    )	{ connect_gateway(); }
+elsif ( $command eq "ssh"   )	{ connect_system( "ssh",  $system ); }
+elsif ( $command eq "sftp"  )	{ connect_system( "sftp", $system ); }
 elsif ( $command eq "ls"    )	{ list_systems();   }
 elsif ( $command eq "lsgwy" ) 	{ list_gateways();  }
+elsif ( $command eq "scp"   )   { secure_copy ( $system, $file_for_scp ) }
 #
 # Help!
 #
@@ -223,10 +223,12 @@ sub stop_gateway {
 }
 
 #
-# SSH to a system
+# SSH or SFTP to a system
 #
 sub connect_system {
+    my $command         = shift;
     my $system_name	= shift;
+    my $other_params    = join ' ', @_;
 
     my $user;
     if ( $system_name =~ /(.+)\@(.+)/ ) { # User given in command
@@ -267,10 +269,94 @@ sub connect_system {
     else {
 	$system = "localhost";
     }
-    system qq(ssh -p $tunnel_port $crypt $debug $system);
+    if    ( $command eq "ssh" ) {
+        system qq(ssh -p $tunnel_port $crypt $debug $system $other_params);
+    }
+    elsif ( $command eq "sftp" ) {
+        system qq(sftp -P $tunnel_port $crypt $system $other_params);
+    }
+    else {
+        die qq(ERROR: Invalid tunnel command sent to connect_system\n);
+    }
 }
 
-sub connect_gateway {
+sub secure_copy {
+    my $file1           = shift;
+    my $file2           = shift;
+
+    my $tnl = Local::Tunnel->new( TNLRC );
+
+    #
+    # If the file spec contains a colon, we know it has to be in this
+    # format:
+    #
+    #     <user>@<system>:<file>
+    # Where both <user> and <file> are optional. If there is no colon,
+    # we know the format is just the name of a file.
+    #
+
+    my $file_with_sysname = qr/
+        ^(?:(?<user>\w+)(?:@))? # May contain a user name followed by an "@"
+        (?<system>\w+)          # This is followee by a system name
+        :                       # And a colon
+        (?<file>\w*)            # Followed by an optional file name
+    /x;
+    
+    my $port;
+    my $system;
+    my $system_name;
+    my $user;
+    if ( $file1 =~ $file_with_sysname ) {
+        $system_name = $+{system};
+        $system = $tnl->System( $system_name );
+        if ( not $system ) {
+            die qq(System "$system_name" is not defined in "@{[TNLRC]}" file\n);
+        }
+        $user = $+{user}    ? $+{user} : "";       # These should be defined
+        my $file = $+{file} ? $+{file} : "";       # even if they're null strings
+        if ( not $user ) {
+            $user = $system->User;
+        }
+        $file1 = "$user\@" if $user;
+        $file1 .= "localhost:";
+    }
+    elsif ( $file2 =~ $file_with_sysname ) {
+        $system_name = $+{system};
+        $system = $tnl->System( $system_name );
+        if ( not $system ) {
+            die qq(System "$system_name" is not defined in "@{[TNLRC]}" file\n);
+        }
+        $user = $+{user}    ? $+{user} : "";       # These should be defined
+        my $file = $+{file} ? $+{file} : "";       # even if they're null strings
+        my $system = $tnl->System( $system_name );
+        if ( not $user ) {
+            $user = $system->User;
+        }
+        $file2 = "$user\@" if $user;
+        $file2 .= "localhost:";
+    }
+    if ( not $system->Active ) {
+	die qq(Cannot log into $system_name. Gateway is not active.\n);
+    }
+    my $crypt = $system->Crypt;
+    my $debug = $system->Debug;
+    my $tunnel_port = $system->Tunnel_port;
+    my $system_system = $system->System;
+
+
+    if ( defined $debug ) {
+	$debug = "-v " x $debug;
+    }
+    else {
+	$debug = "";
+    }
+    if ( defined $crypt ) {
+	$crypt = "-c $crypt";
+    }
+    else {
+	$crypt = "";
+    }
+    system qq(scp -P $tunnel_port $crypt $file1 $file2);
 }
 
 #

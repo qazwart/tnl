@@ -64,6 +64,9 @@ else  {
 sub start_gateway {
     my $gateway_name =	shift;
 
+    if ( not $gateway_name ) {
+        die qq(Need to pass in the name of the Gateway Server: tnl start <Gateway>.\n);
+    }
     my $tnl = Local::Tunnel->new( TNLRC );
     my %gateways = $tnl->Gateway;
     if ( not exists $gateways{ $gateway_name } ) {
@@ -195,6 +198,9 @@ sub start_gateway {
 sub stop_gateway {
     my $gateway_name = shift;
 
+    if ( not $gateway_name ) {
+        die qq(Need to pass in the name of the Gateway system: tnl stop <Gateway>\n);
+    }
     my $tnl = Local::Tunnel->new( TNLRC );
     my %gateways = $tnl->Gateway;	#Need to look up gateway
     if ( not exists $gateways{ $gateway_name } ) {
@@ -238,6 +244,9 @@ sub connect_system {
     my $system_name	= shift;
     my $other_params    = join ' ', @_;
 
+    if ( not $system_name ) {
+        die qq(Need to pass in the name of a system to log into: tnl $command <system>\n);
+    }
     my $user;
     if ( $system_name =~ /(.+)\@(.+)/ ) { # User given in command
 	$user = $1;
@@ -291,6 +300,10 @@ sub connect_system {
 sub secure_copy {
     my $file1           = shift;
     my $file2           = shift;
+
+    if ( not $file2 ) {
+        die q(Need both to and from file: tnl scp [<user>@][system:]<file1> [<user>@][system:]<file2>\n);
+    }
 
     my $tnl = Local::Tunnel->new( TNLRC );
 

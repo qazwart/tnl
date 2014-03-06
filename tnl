@@ -317,10 +317,10 @@ sub secure_copy {
     #
 
     my $file_with_sysname = qr/
-        ^(?:(?<user>\w+)(?:@))? # May contain a user name followed by an "@"
-        (?<system>\w+)          # This is followee by a system name
+        ^(?:(?<user>\S+)(?:@))? # May contain a user name followed by an "@"
+        (?<system>\S+)          # This is followee by a system name
         :                       # And a colon
-        (?<file>\w*)            # Followed by an optional file name
+        (?<file>\S*)            # Followed by an optional file name
     /x;
     
     my $port;
@@ -339,9 +339,10 @@ sub secure_copy {
             $user = $system->User;
         }
         $file1 = "$user\@" if $user;
-        $file1 .= "localhost:";
+        $file1 = "localhost:$file";
     }
     elsif ( $file2 =~ $file_with_sysname ) {
+        say qq(DEBUG: system is on file2);
         $system_name = $+{system};
         $system = $tnl->System( $system_name );
         if ( not $system ) {
@@ -349,12 +350,13 @@ sub secure_copy {
         }
         $user = $+{user}    ? $+{user} : "";       # These should be defined
         my $file = $+{file} ? $+{file} : "";       # even if they're null strings
+        say qq(DEBUG: File = "$file" User = "$user" System = "$system_name");
         my $system = $tnl->System( $system_name );
         if ( not $user ) {
             $user = $system->User;
         }
         $file2 = "$user\@" if $user;
-        $file2 .= "localhost:";
+        $file2 = "localhost:$file";
     }
     if ( not $system->Active ) {
 	die qq(Cannot log into $system_name. Gateway is not active.\n);
@@ -377,6 +379,7 @@ sub secure_copy {
     else {
 	$crypt = "";
     }
+    say qq(DEBUG: scp -P $tunnel_port $crypt $file1 $file2);
     system qq(scp -P $tunnel_port $crypt $file1 $file2);
 }
 
@@ -491,7 +494,7 @@ sub rewrite_tnlrc_file {
         if    ( $line !~ SYSTEM_LINE ) {        # Ignore all lines unless for system
             $new_tnlrc->say( "$line" );
         }
-        elsif ( $line =~ /-+port\s/ ) {      # Port already on the line
+        elsif ( $line =~ /-+tunnel\s/ ) {      # Port already on the line
             $new_tnlrc->say( "$line" );
         }
         #
@@ -505,7 +508,7 @@ sub rewrite_tnlrc_file {
             elsif ( $line =~ /\s-+system\s+(\S+)/ ) { # May not have a -name, use -system
                 $system_name = $1;
             }
-            $new_tnlrc->say("$line -port $ports{$system_name}");
+            $new_tnlrc->say("$line -tunnel $ports{$system_name}");
         }
     }
     $old_tnlrc->close;

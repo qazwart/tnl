@@ -412,11 +412,10 @@ sub list_systems {
 	my $entry = $systems{ $system };
 	my $x11 = $entry->X11 ? "Yes" : "No";
 	my $port;
-	my $active = "";
+	my $active = $entry->Active ? "*" : "";
 	my $gateway = $entry->Gateway ? $entry->Gateway : "";
 	if ( defined $entry->Tunnel_port ) {
 	    $port = $entry->Tunnel_port;
-	    $active = "*";
 	}
 	    
 	no warnings qw(uninitialized);
